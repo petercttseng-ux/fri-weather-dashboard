@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>農業部水產試驗所｜逐時氣象與累積雨量儀表板</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="FRI logo.jpg" alt="農業部水產試驗所 Fri logo" />
+          <div>
+            <strong>農業部水產試驗所</strong>
+            <span>Fri Weather Intelligence</span>
+          </div>
+        </div>
+        <nav aria-label="主要功能">
+          <a href="#settings" class="active">API 設定</a>
+          <a href="#live">逐時氣象</a>
+          <a href="#rainfall">累積雨量</a>
+          <a href="#history">歷史資料</a>
+        </nav>
+        <div class="status-card">
+          <span class="dot" id="statusDot"></span>
+          <div>
+            <strong id="statusText">尚未更新</strong>
+            <small id="statusHint">設定授權碼後即可取得最新資料</small>
+          </div>
+        </div>
+      </aside>
+
+      <main>
+        <section class="topbar">
+          <div>
+            <p class="eyebrow">Central Weather Administration Open Data</p>
+            <h1>逐時氣象與累積雨量監測儀表板</h1>
+          </div>
+          <div class="actions">
+            <button id="refreshBtn" class="primary">更新 CWA 最新資料</button>
+            <button id="sampleBtn" class="secondary">載入示範資料</button>
+          </div>
+        </section>
+
+        <section id="settings" class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Configuration</p>
+              <h2>CWA API 與雲端資料庫設定</h2>
+            </div>
+            <button id="saveSettingsBtn" class="secondary">儲存設定</button>
+          </div>
+          <div class="settings-grid">
+            <label>
+              CWA API 授權碼
+              <input id="apiKey" type="password" autocomplete="off" placeholder="請輸入 Authorization token" />
+            </label>
+            <label>
+              雨量觀測資料集
+              <input id="rainResource" value="O-A0002-001" />
+            </label>
+            <label>
+              全測站逐時氣象資料集
+              <input id="weatherResource" value="O-A0003-001" />
+            </label>
+            <label>
+              Supabase Project URL
+              <input id="supabaseUrl" placeholder="https://xxxx.supabase.co" />
+            </label>
+            <label>
+              Supabase anon key
+              <input id="supabaseKey" type="password" autocomplete="off" placeholder="可留空，改用本機 IndexedDB" />
+            </label>
+            <label>
+              資料表名稱
+              <input id="supabaseTable" value="weather_observations" />
+            </label>
+          </div>
+          <details class="sql-box">
+            <summary>Supabase 免費資料庫建表 SQL</summary>
+            <pre><code>create table if not exists weather_observations (
+  id bigserial primary key,
+  station_id text not null,
+  station_name text,
+  county text,
+  town text,
+  observed_at timestamptz not null,
+  source text not null,
+  rain_1h numeric,
+  rain_24h numeric,
+  rain_48h numeric,
+  temperature numeric,
+  humidity numeric,
+  wind_speed numeric,
+  pressure numeric,
+  payload jsonb,
+  created_at timestamptz default now()
+);
+
+create index if not exists weather_observations_time_idx
+  on weather_observations (observed_at);
+
+create index if not exists weather_observations_area_idx
+  on weather_observations (county, town);</code></pre>
+          </details>
+        </section>
+
+        <section class="metric-grid" aria-label="資料摘要">
+          <article>
+            <span>觀測站筆數</span>
+            <strong id="stationCount">0</strong>
+          </article>
+          <article>
+            <span>最高 1 小時雨量</span>
+            <strong id="maxRain1h">--</strong>
+          </article>
+          <article>
+            <span>24 小時紅色警戒</span>
+            <strong id="alert24Count">0</strong>
+          </article>
+          <article>
+            <span>資料庫日期區間</span>
+            <strong id="dbRange">尚無資料</strong>
+          </article>
+        </section>
+
+        <section id="live" class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Live Observations</p>
+              <h2>API 取得之逐時氣象資料</h2>
+            </div>
+            <div class="filter-row">
+              <input id="searchInput" placeholder="搜尋測站、縣市、鄉鎮" />
+              <select id="sourceFilter">
+                <option value="all">全部資料</option>
+                <option value="rain">雨量資料</option>
+                <option value="weather">逐時氣象</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>測站</th>
+                  <th>縣市</th>
+                  <th>鄉鎮</th>
+                  <th><button data-sort="observedAt">觀測時間</button></th>
+                  <th><button data-sort="rain1h">1H 雨量</button></th>
+                  <th><button data-sort="rain24h">24H 雨量</button></th>
+                  <th><button data-sort="rain48h">48H 雨量</button></th>
+                  <th><button data-sort="temperature">溫度</button></th>
+                  <th><button data-sort="humidity">濕度</button></th>
+                  <th><button data-sort="windSpeed">風速</button></th>
+                  <th><button data-sort="pressure">氣壓</button></th>
+                </tr>
+              </thead>
+              <tbody id="weatherRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="rainfall" class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Accumulated Rainfall</p>
+              <h2>縣市與鄉鎮 24 / 48 小時累積雨量</h2>
+            </div>
+            <div class="range-tools">
+              <label>結束時間 <input id="rangeEnd" type="datetime-local" /></label>
+              <button id="calcRangeBtn" class="secondary">重新計算</button>
+            </div>
+          </div>
+          <div class="two-columns">
+            <div>
+              <h3>縣市排序</h3>
+              <div class="table-wrap compact">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>縣市</th>
+                      <th><button data-agg-sort="rain24h" data-target="county">24H</button></th>
+                      <th><button data-agg-sort="rain48h" data-target="county">48H</button></th>
+                      <th>警戒</th>
+                    </tr>
+                  </thead>
+                  <tbody id="countyRows"></tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+              <h3>鄉鎮排序</h3>
+              <div class="table-wrap compact">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>縣市 / 鄉鎮</th>
+                      <th><button data-agg-sort="rain24h" data-target="town">24H</button></th>
+                      <th><button data-agg-sort="rain48h" data-target="town">48H</button></th>
+                      <th>警戒</th>
+                    </tr>
+                  </thead>
+                  <tbody id="townRows"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="history" class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Historical Import</p>
+              <h2>歷史氣象資料上傳與日期區間</h2>
+            </div>
+            <label class="file-button">
+              上傳 CSV / JSON
+              <input id="historyFile" type="file" accept=".csv,.json,application/json,text/csv" />
+            </label>
+          </div>
+          <div class="history-grid">
+            <div>
+              <span>目前資料庫最早時間</span>
+              <strong id="minDate">尚無資料</strong>
+            </div>
+            <div>
+              <span>目前資料庫最新時間</span>
+              <strong id="maxDate">尚無資料</strong>
+            </div>
+            <div>
+              <span>資料儲存位置</span>
+              <strong id="storageMode">本機 IndexedDB</strong>
+            </div>
+          </div>
+          <p class="note">
+            CSV 欄位可使用 station_id、station_name、county、town、observed_at、rain_1h、rain_24h、rain_48h、temperature、humidity、wind_speed、pressure；JSON 可上傳相同鍵值陣列。
+          </p>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
