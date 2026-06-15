@@ -60,6 +60,11 @@ function setStatus(type, text, hint) {
   $("statusHint").textContent = hint;
 }
 
+function setDiagnostics(message) {
+  const box = $("dbDiagnostics");
+  if (box) box.textContent = message || "尚無診斷訊息。";
+}
+
 function loadSettings() {
   const saved = JSON.parse(localStorage.getItem("friWeatherSettings") || "{}");
   state.settings = { ...DEFAULT_SETTINGS, ...saved };
@@ -194,9 +199,6 @@ function toMinimalDbRow(row) {
   const stationId = row.stationId || `${row.source || "row"}-${row.stationName || "unknown"}-${observedAt}`;
   return compactObject({
     station_id: stationId,
-    station_name: row.stationName || "",
-    county: row.county || "",
-    town: row.town || "",
     observed_at: observedAt,
     source: row.source || "unknown",
   });
@@ -303,6 +305,7 @@ async function supabaseErrorMessage(response) {
 
 async function postSupabaseRows(rows, mapper) {
   const endpoint = `${state.settings.supabaseUrl.replace(/\/$/, "")}/rest/v1/${state.settings.supabaseTable}`;
+  const payload = rows.map(mapper);
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -311,9 +314,16 @@ async function postSupabaseRows(rows, mapper) {
       "Content-Type": "application/json",
       Prefer: "return=minimal",
     },
-    body: JSON.stringify(rows.map(mapper)),
+    body: JSON.stringify(payload),
   });
-  if (!response.ok) throw new Error(`Supabase 儲存失敗：${response.status} ${await supabaseErrorMessage(response)}`);
+  if (!response.ok) {
+    const detail = await supabaseErrorMessage(response);
+    const error = new Error(`Supabase 儲存失敗：${response.status} ${detail}`);
+    error.status = response.status;
+    error.detail = detail;
+    error.samplePayload = payload[0] ? JSON.stringify(payload[0], null, 2) : "";
+    throw error;
+  }
 }
 
 async function saveSupabase(rows) {
@@ -324,8 +334,13 @@ async function saveSupabase(rows) {
       await postSupabaseRows(chunk, toDbRow);
     } catch (error) {
       const message = String(error.message || "");
-      if (message.includes("Could not find") || message.includes("schema cache") || message.includes("PGRST204")) {
-        await postSupabaseRows(chunk, toMinimalDbRow);
+      if (error.status === 400 || message.includes("Could not find") || message.includes("schema cache") || message.includes("PGRST204")) {
+        try {
+          await postSupabaseRows(chunk, toMinimalDbRow);
+        } catch (minimalError) {
+          minimalError.message = `${error.message}\n最小欄位重試仍失敗：${minimalError.message}\n送出範例：${minimalError.samplePayload || error.samplePayload || ""}`;
+          throw minimalError;
+        }
       } else {
         throw error;
       }
@@ -352,14 +367,29 @@ async function persistRows(rows) {
   if (state.settings.supabaseUrl && state.settings.supabaseKey) {
     try {
       await saveSupabase(rows);
+      setDiagnostics(`Supabase 寫入成功：${rows.length} 筆。`);
       return { mode: "supabase" };
     } catch (error) {
-      await saveLocal(rows);
-      return { mode: "local", warning: error.message };
+      const supabaseMessage = error.message;
+      try {
+        await saveLocal(rows);
+        setDiagnostics(`${supabaseMessage}\n\n已暫存本機 IndexedDB：${rows.length} 筆。`);
+        return { mode: "local", warning: supabaseMessage };
+      } catch (localError) {
+        const message = `${supabaseMessage}\n\n本機 IndexedDB 暫存也失敗：${localError.message}`;
+        setDiagnostics(message);
+        return { mode: "memory", warning: message };
+      }
     }
   }
-  await saveLocal(rows);
-  return { mode: "local" };
+  try {
+    await saveLocal(rows);
+    setDiagnostics(`本機 IndexedDB 寫入成功：${rows.length} 筆。`);
+    return { mode: "local" };
+  } catch (error) {
+    setDiagnostics(`本機 IndexedDB 寫入失敗：${error.message}`);
+    return { mode: "memory", warning: error.message };
+  }
 }
 
 async function loadDatabaseRows() {
@@ -390,7 +420,12 @@ async function refreshData() {
     const weatherRows = getRecordStations(weatherData).map((item) => normalizeStation(item, "weather"));
     state.liveRows = mergeRows([...rainRows, ...weatherRows]);
     const persistence = await persistRows(state.liveRows);
-    await loadDatabaseRows();
+    try {
+      await loadDatabaseRows();
+    } catch (loadError) {
+      console.warn(loadError);
+      setDiagnostics(`${$("dbDiagnostics")?.textContent || ""}\n\n資料庫讀取失敗：${loadError.message}`);
+    }
     renderLiveRows();
     renderSummary();
     if (persistence.warning) {

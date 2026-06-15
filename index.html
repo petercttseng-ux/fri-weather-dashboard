@@ -104,6 +104,10 @@ create index if not exists weather_observations_time_idx
 create index if not exists weather_observations_area_idx
   on weather_observations (county, town);</code></pre>
           </details>
+          <details class="sql-box" open>
+            <summary>資料庫連線診斷</summary>
+            <pre id="dbDiagnostics">尚無診斷訊息。</pre>
+          </details>
         </section>
 
         <section class="metric-grid" aria-label="資料摘要">
@@ -242,6 +246,6 @@ create index if not exists weather_observations_area_idx
     </div>
 
     <div id="toast" role="status" aria-live="polite"></div>
-    <script src="app.js"></script>
+    <script src="app.js?v=20260615-supabase-diagnostics"></script>
   </body>
 </html>
