@@ -134,22 +134,12 @@ async function main() {
     process.exit(0);
   }
 
-  const sb = createClient(SB_URL, SB_KEY, {
-    realtime: {
-      headers: {
-        'X-Client-Info': 'supabase-js/2.x',
-      },
-    },
-    global: {
-      fetch: (url, options = {}) =>
-        fetch(url, { ...options }),
-    },
-  });
-
-  // 為 Supabase 客戶端配置 WebSocket（Node.js 20 相容性）
+  // �� Supabase 客戶端配置 WebSocket（Node.js 20+ 相容性）
   if (typeof globalThis.WebSocket === 'undefined') {
     globalThis.WebSocket = WebSocket;
   }
+
+  const sb = createClient(SB_URL, SB_KEY);
 
   let wOk = 0, rOk = 0;
   if (weatherRows.length) {
