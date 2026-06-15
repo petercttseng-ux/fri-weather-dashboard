@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>農業部水產試驗所 — 氣象監測儀表板</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
+  <!-- Flatpickr date picker -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
+
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<header class="fri-header">
+  <div class="container-fluid px-4">
+    <div class="d-flex align-items-center gap-3">
+      <img src="assets/fri-logo.jpg" alt="FRI Logo" class="fri-logo" onerror="this.src='assets/favicon.svg'" />
+      <div>
+        <div class="fri-org">農業部水產試驗所</div>
+        <div class="fri-title">即時氣象監測儀表板</div>
+      </div>
+      <div class="ms-auto d-flex align-items-center gap-3">
+        <div class="status-badge" id="apiStatusBadge">
+          <span class="status-dot"></span>
+          <span id="apiStatusText">未連線</span>
+        </div>
+        <div class="text-white-50 small" id="lastUpdateTime">—</div>
+        <button class="btn btn-outline-light btn-sm" id="btnRefresh" onclick="App.fetchAll()">
+          <i class="bi bi-arrow-clockwise"></i> 更新
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ===== NAVIGATION ===== -->
+<nav class="fri-nav">
+  <div class="container-fluid px-4">
+    <ul class="nav nav-pills fri-nav-pills" id="mainNav">
+      <li class="nav-item">
+        <a class="nav-link active" data-tab="tabWeather" href="#tabWeather" onclick="App.switchTab(this,'tabWeather');return false;">
+          <i class="bi bi-thermometer-half"></i> 即時氣象
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-tab="tabRainfall" href="#tabRainfall" onclick="App.switchTab(this,'tabRainfall');return false;">
+          <i class="bi bi-cloud-rain-heavy"></i> 即時雨量
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-tab="tabRanking" href="#tabRanking" onclick="App.switchTab(this,'tabRanking');return false;">
+          <i class="bi bi-bar-chart-line"></i> 縣市/鄉鎮排行
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-tab="tabQuery" href="#tabQuery" onclick="App.switchTab(this,'tabQuery');return false;">
+          <i class="bi bi-search"></i> 時段累雨查詢
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-tab="tabUpload" href="#tabUpload" onclick="App.switchTab(this,'tabUpload');return false;">
+          <i class="bi bi-upload"></i> 歷史資料上傳
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-tab="tabSettings" href="#tabSettings" onclick="App.switchTab(this,'tabSettings');return false;">
+          <i class="bi bi-gear"></i> 系統設定
+        </a>
+      </li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ===== MAIN CONTENT ===== -->
+<main class="container-fluid px-4 py-3">
+
+  <!-- ── TAB: 即時氣象 ── -->
+  <div id="tabWeather" class="tab-pane active">
+    <div class="row g-3 mb-3">
+      <div class="col-md-3"><div class="kpi-card" id="kpiTemp"><div class="kpi-icon"><i class="bi bi-thermometer-half"></i></div><div class="kpi-val">—</div><div class="kpi-label">最高氣溫 (°C)</div></div></div>
+      <div class="col-md-3"><div class="kpi-card" id="kpiHumi"><div class="kpi-icon"><i class="bi bi-droplet-half"></i></div><div class="kpi-val">—</div><div class="kpi-label">平均相對濕度 (%)</div></div></div>
+      <div class="col-md-3"><div class="kpi-card" id="kpiWind"><div class="kpi-icon"><i class="bi bi-wind"></i></div><div class="kpi-val">—</div><div class="kpi-label">最大風速 (m/s)</div></div></div>
+      <div class="col-md-3"><div class="kpi-card" id="kpiRain1h"><div class="kpi-icon"><i class="bi bi-cloud-rain"></i></div><div class="kpi-val">—</div><div class="kpi-label">最大時雨量 (mm)</div></div></div>
+    </div>
+    <div class="card fri-card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-table me-2"></i>全測站逐時氣象資料</span>
+        <div class="d-flex gap-2 align-items-center">
+          <input class="form-control form-control-sm" style="width:200px" id="weatherSearch" placeholder="搜尋測站/縣市..." oninput="WeatherUI.filter(this.value)" />
+          <span class="badge bg-secondary" id="weatherCount">0 站</span>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover table-sm fri-table mb-0" id="weatherTable">
+            <thead>
+              <tr>
+                <th onclick="WeatherUI.sort('StationName')">測站名稱 <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="WeatherUI.sort('County')">縣市 <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="WeatherUI.sort('Town')">鄉鎮 <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="WeatherUI.sort('Temperature')">氣溫(°C) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="WeatherUI.sort('RelativeHumidity')">濕度(%) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="WeatherUI.sort('Pressure')">氣壓(hPa) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="WeatherUI.sort('WindSpeed')">風速(m/s) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="WeatherUI.sort('WindDirection')">風向(°) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="WeatherUI.sort('GustInfo')">最大陣風 <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="WeatherUI.sort('Precipitation')">時雨量(mm) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="WeatherUI.sort('SunshineDuration')">日照時數 <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th>觀測時間</th>
+              </tr>
+            </thead>
+            <tbody id="weatherBody">
+              <tr><td colspan="12" class="text-center py-4 text-muted"><i class="bi bi-hourglass-split me-2"></i>請點擊「更新」載入資料</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB: 即時雨量 ── -->
+  <div id="tabRainfall" class="tab-pane d-none">
+    <div class="row g-3 mb-3">
+      <div class="col-md-3"><div class="kpi-card"><div class="kpi-icon text-info"><i class="bi bi-cloud-drizzle"></i></div><div class="kpi-val" id="kpiRain10m">—</div><div class="kpi-label">最大10分鐘雨量 (mm)</div></div></div>
+      <div class="col-md-3"><div class="kpi-card"><div class="kpi-icon text-primary"><i class="bi bi-cloud-rain"></i></div><div class="kpi-val" id="kpiRain1hMax">—</div><div class="kpi-label">最大時雨量 (mm)</div></div></div>
+      <div class="col-md-3"><div class="kpi-card"><div class="kpi-icon text-warning"><i class="bi bi-cloud-rain-heavy"></i></div><div class="kpi-val" id="kpiRain24hMax">—</div><div class="kpi-label">最大24小時雨量 (mm)</div></div></div>
+      <div class="col-md-3"><div class="kpi-card"><div class="kpi-icon text-danger"><i class="bi bi-cloud-lightning-rain"></i></div><div class="kpi-val" id="kpiRain48hMax">—</div><div class="kpi-label">最大48小時雨量 (mm)</div></div></div>
+    </div>
+    <div class="card fri-card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-cloud-rain-heavy me-2"></i>雨量觀測站資料</span>
+        <div class="d-flex gap-2 align-items-center">
+          <input class="form-control form-control-sm" style="width:200px" id="rainfallSearch" placeholder="搜尋測站/縣市..." oninput="RainfallUI.filter(this.value)" />
+          <span class="badge bg-secondary" id="rainfallCount">0 站</span>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover table-sm fri-table mb-0" id="rainfallTable">
+            <thead>
+              <tr>
+                <th onclick="RainfallUI.sort('StationName')">測站名稱 <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="RainfallUI.sort('County')">縣市 <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="RainfallUI.sort('Town')">鄉鎮 <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="RainfallUI.sort('Rain10Min')">10分鐘(mm) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="RainfallUI.sort('Rain1hr')">1小時(mm) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="RainfallUI.sort('Rain3hr')">3小時(mm) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="RainfallUI.sort('Rain6hr')">6小時(mm) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="RainfallUI.sort('Rain12hr')">12小時(mm) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="RainfallUI.sort('Rain24hr')">24小時(mm) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="RainfallUI.sort('Rain48hr')">48小時(mm) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th onclick="RainfallUI.sort('RainMonth')">本月(mm) <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                <th>觀測時間</th>
+              </tr>
+            </thead>
+            <tbody id="rainfallBody">
+              <tr><td colspan="12" class="text-center py-4 text-muted"><i class="bi bi-hourglass-split me-2"></i>請點擊「更新」載入資料</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB: 縣市/鄉鎮排行 ── -->
+  <div id="tabRanking" class="tab-pane d-none">
+    <div class="alert alert-info d-flex align-items-center mb-3" role="alert">
+      <i class="bi bi-info-circle-fill me-2"></i>
+      <div>依雨量觀測站API最新資料計算各縣市及鄉鎮之累積降雨量。
+        <span class="badge bg-danger ms-2">24hr &gt; 250mm</span>
+        <span class="badge bg-danger ms-2">48hr &gt; 650mm</span> 標示警戒。
+      </div>
+    </div>
+    <div class="row g-3">
+      <!-- 縣市24hr -->
+      <div class="col-xl-6">
+        <div class="card fri-card h-100">
+          <div class="card-header d-flex justify-content-between">
+            <span><i class="bi bi-geo-alt me-2"></i>縣市別 24小時累積雨量</span>
+            <button class="btn btn-outline-primary btn-xs" onclick="RankingUI.render()"><i class="bi bi-arrow-clockwise"></i></button>
+          </div>
+          <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm fri-table mb-0"><thead><tr><th>排名</th><th>縣市</th><th>測站數</th><th>最大24hr(mm)</th><th>平均24hr(mm)</th><th>警戒</th></tr></thead><tbody id="county24Body"></tbody></table></div></div>
+        </div>
+      </div>
+      <!-- 縣市48hr -->
+      <div class="col-xl-6">
+        <div class="card fri-card h-100">
+          <div class="card-header"><i class="bi bi-geo-alt me-2"></i>縣市別 48小時累積雨量</div>
+          <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm fri-table mb-0"><thead><tr><th>排名</th><th>縣市</th><th>測站數</th><th>最大48hr(mm)</th><th>平均48hr(mm)</th><th>警戒</th></tr></thead><tbody id="county48Body"></tbody></table></div></div>
+        </div>
+      </div>
+      <!-- 鄉鎮24hr -->
+      <div class="col-xl-6">
+        <div class="card fri-card h-100">
+          <div class="card-header"><i class="bi bi-pin-map me-2"></i>鄉鎮別 24小時累積雨量（Top 30）</div>
+          <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm fri-table mb-0"><thead><tr><th>排名</th><th>縣市</th><th>鄉鎮</th><th>測站</th><th>24hr雨量(mm)</th><th>警戒</th></tr></thead><tbody id="town24Body"></tbody></table></div></div>
+        </div>
+      </div>
+      <!-- 鄉鎮48hr -->
+      <div class="col-xl-6">
+        <div class="card fri-card h-100">
+          <div class="card-header"><i class="bi bi-pin-map me-2"></i>鄉鎮別 48小時累積雨量（Top 30）</div>
+          <div class="card-body p-0"><div class="table-responsive"><table class="table table-sm fri-table mb-0"><thead><tr><th>排名</th><th>縣市</th><th>鄉鎮</th><th>測站</th><th>48hr雨量(mm)</th><th>警戒</th></tr></thead><tbody id="town48Body"></tbody></table></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB: 時段累雨查詢 ── -->
+  <div id="tabQuery" class="tab-pane d-none">
+    <div class="card fri-card mb-3">
+      <div class="card-header"><i class="bi bi-funnel me-2"></i>查詢條件</div>
+      <div class="card-body">
+        <div class="row g-3 align-items-end">
+          <div class="col-md-3">
+            <label class="form-label">開始時間</label>
+            <input type="text" class="form-control" id="queryStart" placeholder="YYYY-MM-DD HH:MM" />
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">結束時間</label>
+            <input type="text" class="form-control" id="queryEnd" placeholder="YYYY-MM-DD HH:MM" />
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">快速選擇</label>
+            <select class="form-select" id="quickRange" onchange="QueryUI.setQuick(this.value)">
+              <option value="">自訂</option>
+              <option value="24">最近24小時</option>
+              <option value="48">最近48小時</option>
+              <option value="72">最近72小時</option>
+              <option value="168">最近7天</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-primary w-100" onclick="QueryUI.query()"><i class="bi bi-search me-2"></i>查詢</button>
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-outline-secondary w-100" onclick="QueryUI.exportCSV()"><i class="bi bi-download me-2"></i>匯出CSV</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="row g-3">
+      <div class="col-xl-6">
+        <div class="card fri-card">
+          <div class="card-header"><i class="bi bi-cloud-rain me-2"></i>24小時累積降雨量排行</div>
+          <div class="card-body p-0">
+            <div class="table-responsive"><table class="table table-sm fri-table mb-0"><thead><tr><th>排名</th><th>縣市</th><th>鄉鎮</th><th>測站</th><th>累積雨量(mm)</th><th>警戒</th></tr></thead><tbody id="query24Body"><tr><td colspan="6" class="text-center py-3 text-muted">請選擇查詢時段</td></tr></tbody></table></div>
+          </div>
+        </div>
+      </div>
+      <div class="col-xl-6">
+        <div class="card fri-card">
+          <div class="card-header"><i class="bi bi-cloud-rain-heavy me-2"></i>48小時累積降雨量排行</div>
+          <div class="card-body p-0">
+            <div class="table-responsive"><table class="table table-sm fri-table mb-0"><thead><tr><th>排名</th><th>縣市</th><th>鄉鎮</th><th>測站</th><th>累積雨量(mm)</th><th>警戒</th></tr></thead><tbody id="query48Body"><tr><td colspan="6" class="text-center py-3 text-muted">請選擇查詢時段</td></tr></tbody></table></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB: 歷史資料上傳 ── -->
+  <div id="tabUpload" class="tab-pane d-none">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="card fri-card">
+          <div class="card-header"><i class="bi bi-upload me-2"></i>上傳歷史氣象資料</div>
+          <div class="card-body">
+            <div class="mb-3">
+              <label class="form-label">資料類型</label>
+              <select class="form-select" id="uploadType">
+                <option value="weather">氣象觀測資料</option>
+                <option value="rainfall">雨量觀測資料</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">選擇檔案 (CSV / JSON)</label>
+              <input class="form-control" type="file" id="uploadFile" accept=".csv,.json" />
+              <div class="form-text">CSV格式：第一列為欄位名稱，時間欄位名稱為 ObsTime 或 DateTime</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">資料來源說明（選填）</label>
+              <input class="form-control" type="text" id="uploadNote" placeholder="例如：2024年颱風期間觀測資料" />
+            </div>
+            <button class="btn btn-primary" onclick="UploadUI.upload()"><i class="bi bi-cloud-upload me-2"></i>上傳至資料庫</button>
+            <div id="uploadProgress" class="mt-3 d-none">
+              <div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated" id="uploadBar" style="width:0%"></div></div>
+              <div class="text-muted small mt-1" id="uploadStatus"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card fri-card">
+          <div class="card-header"><i class="bi bi-database me-2"></i>資料庫現有資料</div>
+          <div class="card-body">
+            <div id="dbStats">
+              <div class="text-muted text-center py-3"><i class="bi bi-hourglass-split me-2"></i>載入中...</div>
+            </div>
+          </div>
+        </div>
+        <div class="card fri-card mt-3">
+          <div class="card-header"><i class="bi bi-question-circle me-2"></i>CSV格式說明</div>
+          <div class="card-body">
+            <p class="small mb-2"><strong>氣象資料欄位：</strong></p>
+            <code class="small d-block bg-light p-2 rounded">ObsTime,StationId,StationName,County,Town,Temperature,RelativeHumidity,Pressure,WindSpeed,WindDirection,Precipitation</code>
+            <p class="small mt-3 mb-2"><strong>雨量資料欄位：</strong></p>
+            <code class="small d-block bg-light p-2 rounded">ObsTime,StationId,StationName,County,Town,Rain10Min,Rain1hr,Rain3hr,Rain6hr,Rain12hr,Rain24hr,Rain48hr</code>
+            <button class="btn btn-outline-secondary btn-sm mt-3" onclick="UploadUI.downloadTemplate('weather')"><i class="bi bi-download me-1"></i>氣象範本</button>
+            <button class="btn btn-outline-secondary btn-sm mt-3 ms-2" onclick="UploadUI.downloadTemplate('rainfall')"><i class="bi bi-download me-1"></i>雨量範本</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB: 系統設定 ── -->
+  <div id="tabSettings" class="tab-pane d-none">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="card fri-card">
+          <div class="card-header"><i class="bi bi-key me-2"></i>CWA API 設定</div>
+          <div class="card-body">
+            <div class="mb-3">
+              <label class="form-label">API 授權碼</label>
+              <div class="input-group">
+                <input type="text" class="form-control" id="settingApiKey" placeholder="CWA-XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" />
+                <button class="btn btn-outline-secondary" onclick="SettingsUI.toggleKey()"><i class="bi bi-eye" id="eyeIcon"></i></button>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">自動更新間隔（分鐘）</label>
+              <select class="form-select" id="settingInterval">
+                <option value="0">停用自動更新</option>
+                <option value="10">每10分鐘</option>
+                <option value="30" selected>每30分鐘</option>
+                <option value="60">每60分鐘</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">API 端點（進階）</label>
+              <input type="text" class="form-control form-control-sm" id="settingWeatherEndpoint" value="https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0001-001" />
+              <div class="form-text">氣象觀測站-全測站逐時氣象</div>
+              <input type="text" class="form-control form-control-sm mt-2" id="settingRainfallEndpoint" value="https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0002-001" />
+              <div class="form-text">雨量觀測站-雨量資料</div>
+            </div>
+            <button class="btn btn-primary" onclick="SettingsUI.saveCWA()"><i class="bi bi-save me-2"></i>儲存CWA設定</button>
+            <button class="btn btn-outline-secondary ms-2" onclick="App.fetchAll()"><i class="bi bi-play-circle me-2"></i>立即測試連線</button>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card fri-card">
+          <div class="card-header"><i class="bi bi-cloud me-2"></i>雲端資料庫設定 (Supabase)</div>
+          <div class="card-body">
+            <div class="alert alert-info small mb-3">
+              <i class="bi bi-info-circle me-1"></i>
+              使用 <strong>Supabase</strong> 免費雲端資料庫（可儲存500MB）。請至
+              <a href="https://supabase.com" target="_blank">supabase.com</a> 建立免費帳號，
+              複製 Project URL 及 anon public key 填入下方。
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Project URL</label>
+              <input type="text" class="form-control" id="settingSupabaseUrl" placeholder="https://xxxx.supabase.co" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Anon Public Key</label>
+              <input type="text" class="form-control" id="settingSupabaseKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..." />
+            </div>
+            <button class="btn btn-primary" onclick="SettingsUI.saveSupabase()"><i class="bi bi-save me-2"></i>儲存資料庫設定</button>
+            <button class="btn btn-outline-secondary ms-2" onclick="SettingsUI.testSupabase()"><i class="bi bi-wifi me-2"></i>測試連線</button>
+            <div class="mt-3">
+              <button class="btn btn-outline-warning btn-sm" onclick="SettingsUI.showSqlScript()"><i class="bi bi-code-slash me-1"></i>顯示建表SQL腳本</button>
+            </div>
+            <div id="sqlScriptBox" class="d-none mt-3">
+              <label class="form-label">在 Supabase SQL Editor 執行以下腳本建立資料表：</label>
+              <textarea class="form-control font-monospace small" rows="12" readonly id="sqlScriptText"></textarea>
+              <button class="btn btn-outline-secondary btn-sm mt-1" onclick="SettingsUI.copySql()"><i class="bi bi-clipboard me-1"></i>複製</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-12">
+        <div class="card fri-card">
+          <div class="card-header"><i class="bi bi-shield-check me-2"></i>資料管理</div>
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label">本機資料保留天數</label>
+                <select class="form-select" id="settingRetention">
+                  <option value="7">7天</option>
+                  <option value="30" selected>30天</option>
+                  <option value="90">90天</option>
+                  <option value="0">永久保留</option>
+                </select>
+              </div>
+              <div class="col-md-4 d-flex align-items-end">
+                <button class="btn btn-outline-danger" onclick="SettingsUI.clearLocal()"><i class="bi bi-trash me-2"></i>清除本機資料</button>
+              </div>
+              <div class="col-md-4 d-flex align-items-end">
+                <button class="btn btn-outline-secondary" onclick="SettingsUI.exportLocal()"><i class="bi bi-box-arrow-up me-2"></i>匯出本機資料</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ===== SQL MODAL ===== -->
+<div class="modal fade" id="sqlModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Supabase 建表SQL腳本</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body"><pre id="sqlModalText" class="bg-light p-3 small"></pre></div>
+      <div class="modal-footer"><button class="btn btn-primary" onclick="SettingsUI.copySqlModal()"><i class="bi bi-clipboard me-1"></i>複製SQL</button><button class="btn btn-secondary" data-bs-dismiss="modal">關閉</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TOAST CONTAINER ===== -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer"></div>
+
+<!-- ===== SCRIPTS ===== -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/zh-tw.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script src="js/config.js"></script>
+<script src="js/db.js"></script>
+<script src="js/api.js"></script>
+<script src="js/ui-weather.js"></script>
+<script src="js/ui-rainfall.js"></script>
+<script src="js/ui-ranking.js"></script>
+<script src="js/ui-query.js"></script>
+<script src="js/ui-upload.js"></script>
+<script src="js/ui-settings.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
