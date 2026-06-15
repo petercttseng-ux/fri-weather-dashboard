@@ -56,3 +56,25 @@ CSV 至少需要一個時間欄位，例如 `observed_at`、`observedAt`、`ObsT
 ## 注意事項
 
 純前端部署會使 CWA 授權碼與 Supabase anon key 出現在瀏覽器端。若授權碼需要保密，應改為使用後端 proxy 或 serverless function 代為呼叫 CWA API。
+
+## Supabase 400 排查
+
+若畫面顯示 `Supabase 儲存失敗：400`，通常是資料表欄位與程式送出的欄位不一致。請確認資料表至少有下列欄位：
+
+```sql
+alter table weather_observations add column if not exists station_id text;
+alter table weather_observations add column if not exists station_name text;
+alter table weather_observations add column if not exists county text;
+alter table weather_observations add column if not exists town text;
+alter table weather_observations add column if not exists observed_at timestamptz;
+alter table weather_observations add column if not exists source text;
+alter table weather_observations add column if not exists rain_1h numeric;
+alter table weather_observations add column if not exists rain_24h numeric;
+alter table weather_observations add column if not exists rain_48h numeric;
+alter table weather_observations add column if not exists temperature numeric;
+alter table weather_observations add column if not exists humidity numeric;
+alter table weather_observations add column if not exists wind_speed numeric;
+alter table weather_observations add column if not exists pressure numeric;
+```
+
+若剛新增欄位後仍出現 schema cache 相關錯誤，請等待數十秒後重新整理頁面再更新一次。

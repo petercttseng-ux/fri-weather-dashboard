@@ -160,23 +160,46 @@ function normalizeStation(station, source) {
   };
 }
 
+function finiteNumber(value) {
+  const numeric = numberOrNull(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function compactObject(object) {
+  return Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined));
+}
+
 function toDbRow(row) {
+  const observedAt = parseTime(row.observedAt)?.toISOString() || new Date().toISOString();
+  const stationId = row.stationId || `${row.source || "row"}-${row.stationName || "unknown"}-${observedAt}`;
   return {
-    station_id: row.stationId,
-    station_name: row.stationName,
-    county: row.county,
-    town: row.town,
-    observed_at: row.observedAt,
-    source: row.source,
-    rain_1h: row.rain1h,
-    rain_24h: row.rain24h,
-    rain_48h: row.rain48h,
-    temperature: row.temperature,
-    humidity: row.humidity,
-    wind_speed: row.windSpeed,
-    pressure: row.pressure,
-    payload: row.payload,
+    station_id: stationId,
+    station_name: row.stationName || "",
+    county: row.county || "",
+    town: row.town || "",
+    observed_at: observedAt,
+    source: row.source || "unknown",
+    rain_1h: finiteNumber(row.rain1h),
+    rain_24h: finiteNumber(row.rain24h),
+    rain_48h: finiteNumber(row.rain48h),
+    temperature: finiteNumber(row.temperature),
+    humidity: finiteNumber(row.humidity),
+    wind_speed: finiteNumber(row.windSpeed),
+    pressure: finiteNumber(row.pressure),
   };
+}
+
+function toMinimalDbRow(row) {
+  const observedAt = parseTime(row.observedAt)?.toISOString() || new Date().toISOString();
+  const stationId = row.stationId || `${row.source || "row"}-${row.stationName || "unknown"}-${observedAt}`;
+  return compactObject({
+    station_id: stationId,
+    station_name: row.stationName || "",
+    county: row.county || "",
+    town: row.town || "",
+    observed_at: observedAt,
+    source: row.source || "unknown",
+  });
 }
 
 function fromDbRow(row) {
@@ -268,7 +291,17 @@ async function readLocal() {
   });
 }
 
-async function saveSupabase(rows) {
+async function supabaseErrorMessage(response) {
+  const text = await response.text();
+  try {
+    const json = JSON.parse(text);
+    return [json.message, json.details, json.hint, json.code].filter(Boolean).join(" / ");
+  } catch {
+    return text || response.statusText;
+  }
+}
+
+async function postSupabaseRows(rows, mapper) {
   const endpoint = `${state.settings.supabaseUrl.replace(/\/$/, "")}/rest/v1/${state.settings.supabaseTable}`;
   const response = await fetch(endpoint, {
     method: "POST",
@@ -278,9 +311,26 @@ async function saveSupabase(rows) {
       "Content-Type": "application/json",
       Prefer: "return=minimal",
     },
-    body: JSON.stringify(rows.map(toDbRow)),
+    body: JSON.stringify(rows.map(mapper)),
   });
-  if (!response.ok) throw new Error(`Supabase 儲存失敗：${response.status}`);
+  if (!response.ok) throw new Error(`Supabase 儲存失敗：${response.status} ${await supabaseErrorMessage(response)}`);
+}
+
+async function saveSupabase(rows) {
+  const chunkSize = 250;
+  for (let index = 0; index < rows.length; index += chunkSize) {
+    const chunk = rows.slice(index, index + chunkSize);
+    try {
+      await postSupabaseRows(chunk, toDbRow);
+    } catch (error) {
+      const message = String(error.message || "");
+      if (message.includes("Could not find") || message.includes("schema cache") || message.includes("PGRST204")) {
+        await postSupabaseRows(chunk, toMinimalDbRow);
+      } else {
+        throw error;
+      }
+    }
+  }
 }
 
 async function readSupabase() {
@@ -300,10 +350,16 @@ async function readSupabase() {
 
 async function persistRows(rows) {
   if (state.settings.supabaseUrl && state.settings.supabaseKey) {
-    await saveSupabase(rows);
-  } else {
-    await saveLocal(rows);
+    try {
+      await saveSupabase(rows);
+      return { mode: "supabase" };
+    } catch (error) {
+      await saveLocal(rows);
+      return { mode: "local", warning: error.message };
+    }
   }
+  await saveLocal(rows);
+  return { mode: "local" };
 }
 
 async function loadDatabaseRows() {
@@ -333,12 +389,17 @@ async function refreshData() {
     const rainRows = getRecordStations(rainData).map((item) => normalizeStation(item, "rain"));
     const weatherRows = getRecordStations(weatherData).map((item) => normalizeStation(item, "weather"));
     state.liveRows = mergeRows([...rainRows, ...weatherRows]);
-    await persistRows(state.liveRows);
+    const persistence = await persistRows(state.liveRows);
     await loadDatabaseRows();
     renderLiveRows();
     renderSummary();
-    setStatus("ok", "更新完成", `已取得 ${state.liveRows.length} 筆最新觀測資料`);
-    toast("CWA 最新資料已更新並寫入資料庫。");
+    if (persistence.warning) {
+      setStatus("error", "已更新，雲端儲存失敗", "資料已先暫存本機 IndexedDB");
+      toast(persistence.warning);
+    } else {
+      setStatus("ok", "更新完成", `已取得 ${state.liveRows.length} 筆最新觀測資料`);
+      toast(persistence.mode === "supabase" ? "CWA 最新資料已更新並寫入 Supabase。" : "CWA 最新資料已更新並暫存本機。");
+    }
   } catch (error) {
     setStatus("error", "更新失敗", error.message);
     toast(error.message);
