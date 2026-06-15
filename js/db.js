@@ -8,19 +8,28 @@ localDB.version(2).stores({
   uploads:  '++id, type, uploadedAt, note'
 });
 
-/* ── Supabase client ── */
-let _sbClient = null;
+/* ── Supabase clients (read = anon, write = service_role) ── */
+let _sbRead  = null;  // anon key  — for SELECT
+let _sbWrite = null;  // service_role key — for INSERT/UPSERT (bypasses RLS)
 
-function getSupabase() {
+function getSupabaseRead() {
   const cfg = Config.load();
   if (!cfg.supabaseUrl || !cfg.supabaseKey) return null;
-  if (!_sbClient) {
-    _sbClient = supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
-  }
-  return _sbClient;
+  if (!_sbRead) _sbRead = supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
+  return _sbRead;
 }
 
-function resetSupabaseClient() { _sbClient = null; }
+function getSupabaseWrite() {
+  const cfg = Config.load();
+  if (!cfg.supabaseUrl) return null;
+  // prefer service_role key; fall back to anon key
+  const key = cfg.supabaseServiceKey || cfg.supabaseKey;
+  if (!key) return null;
+  if (!_sbWrite) _sbWrite = supabase.createClient(cfg.supabaseUrl, key);
+  return _sbWrite;
+}
+
+function resetSupabaseClient() { _sbRead = null; _sbWrite = null; }
 
 /* ── SQL script for Supabase setup ── */
 const SUPABASE_SQL = `-- ============================================================
@@ -120,8 +129,8 @@ const DB = {
       data:      r
     })));
 
-    // cloud Supabase
-    const sb = getSupabase();
+    // cloud Supabase (use write client to bypass RLS)
+    const sb = getSupabaseWrite();
     if (!sb) return;
     const rows = records.map(r => ({
       observed_at:  r.obsTime,
@@ -142,8 +151,8 @@ const DB = {
       const { error } = await sb
         .from('weather_observations')
         .upsert(rows, { onConflict: 'observed_at,station_id' });
-      if (error) console.warn('Supabase weather upsert error:', error.message, error.details);
-    } catch (e) { console.warn('Supabase weather upsert exception:', e.message); }
+      if (error) throw new Error(error.message);
+    } catch (e) { throw new Error('Supabase 氣象儲存失敗：' + e.message); }
   },
 
   /* Save rainfall batch to local + cloud */
@@ -159,8 +168,8 @@ const DB = {
       data:      r
     })));
 
-    // cloud Supabase
-    const sb = getSupabase();
+    // cloud Supabase (use write client to bypass RLS)
+    const sb = getSupabaseWrite();
     if (!sb) return;
     const rows = records.map(r => ({
       observed_at:  r.obsTime,
@@ -181,8 +190,8 @@ const DB = {
       const { error } = await sb
         .from('rainfall_observations')
         .upsert(rows, { onConflict: 'observed_at,station_id' });
-      if (error) console.warn('Supabase rainfall upsert error:', error.message, error.details);
-    } catch (e) { console.warn('Supabase rainfall upsert exception:', e.message); }
+      if (error) throw new Error(error.message);
+    } catch (e) { throw new Error('Supabase 雨量儲存失敗：' + e.message); }
   },
 
   /* Query rainfall in time range — cloud first, then local fallback */
@@ -190,7 +199,7 @@ const DB = {
     const start = new Date(startMs).toISOString();
     const end   = new Date(endMs).toISOString();
 
-    const sb = getSupabase();
+    const sb = getSupabaseRead();
     if (sb) {
       try {
         const { data, error } = await sb
@@ -227,15 +236,19 @@ const DB = {
 
   /* Test Supabase connection */
   async testSupabase() {
-    const sb = getSupabase();
-    if (!sb) return { ok: false, msg: '未設定 Supabase 連線' };
+    const sbR = getSupabaseRead();
+    const sbW = getSupabaseWrite();
+    if (!sbR && !sbW) return { ok: false, msg: '未設定 Supabase 連線' };
     try {
-      const { data, error } = await sb
-        .from('rainfall_observations')
-        .select('id, observed_at')
-        .limit(1);
-      if (error) return { ok: false, msg: error.message };
-      return { ok: true, msg: '連線成功' };
+      // test read
+      const { error: re } = await (sbR || sbW)
+        .from('rainfall_observations').select('id').limit(1);
+      if (re) return { ok: false, msg: re.message };
+      // test write with empty upsert (just checks permission)
+      const { error: we } = await (sbW || sbR)
+        .from('rainfall_observations').upsert([], { onConflict: 'observed_at,station_id' });
+      if (we && we.code === '42501') return { ok: false, msg: we.message + ' / ' + we.code };
+      return { ok: true, msg: '連線成功，讀寫權限正常' };
     } catch (e) { return { ok: false, msg: e.message }; }
   },
 

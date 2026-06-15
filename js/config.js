@@ -6,7 +6,8 @@ const DEFAULT_CONFIG = {
   autoRefreshMin: 30,
   retentionDays: 30,
   supabaseUrl: '',
-  supabaseKey: ''
+  supabaseKey: '',        // anon key（讀取用）
+  supabaseServiceKey: ''  // service_role key（寫入用，可繞過 RLS）
 };
 
 /* ── Config Manager ── */

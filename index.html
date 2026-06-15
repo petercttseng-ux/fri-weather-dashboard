@@ -78,6 +78,14 @@
   </div>
 </nav>
 
+<!-- ===== DB HINT BANNER ===== -->
+<div id="dbHintBanner" class="d-none alert alert-warning alert-dismissible mb-0 py-2 px-4 rounded-0 border-0" role="alert" style="font-size:.83rem">
+  <i class="bi bi-cloud-slash me-2"></i>
+  <strong>雲端資料庫寫入失敗（401 RLS）</strong>，資料已保存至本機。
+  請至「<a href="#tabSettings" onclick="App.switchTab(document.querySelector('[data-tab=tabSettings]'),'tabSettings');return false;" class="alert-link">系統設定</a>」填入 <strong>service_role key</strong>，或在 Supabase SQL Editor 執行快速修復SQL。
+  <button type="button" class="btn-close btn-sm" onclick="this.parentElement.classList.add('d-none')"></button>
+</div>
+
 <!-- ===== MAIN CONTENT ===== -->
 <main class="container-fluid px-4 py-3">
 
@@ -371,8 +379,18 @@
               <input type="text" class="form-control" id="settingSupabaseUrl" placeholder="https://xxxx.supabase.co" />
             </div>
             <div class="mb-3">
-              <label class="form-label">Anon Public Key</label>
+              <label class="form-label">Anon Public Key <span class="badge bg-secondary">讀取用</span></label>
               <input type="text" class="form-control" id="settingSupabaseKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..." />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">
+                Service Role Key <span class="badge bg-danger">寫入用 — 解決 RLS 401</span>
+              </label>
+              <div class="input-group">
+                <input type="password" class="form-control" id="settingSupabaseServiceKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6... (service_role)" />
+                <button class="btn btn-outline-secondary" onclick="SettingsUI.toggleServiceKey()" title="顯示/隱藏"><i class="bi bi-eye" id="eyeServiceIcon"></i></button>
+              </div>
+              <div class="form-text text-danger"><i class="bi bi-shield-exclamation me-1"></i>取自 Supabase → Settings → API → <strong>service_role secret</strong>。此金鑰可繞過 RLS，請勿公開分享。</div>
             </div>
             <button class="btn btn-primary" onclick="SettingsUI.saveSupabase()"><i class="bi bi-save me-2"></i>儲存資料庫設定</button>
             <button class="btn btn-outline-secondary ms-2" onclick="SettingsUI.testSupabase()"><i class="bi bi-wifi me-2"></i>測試連線</button>

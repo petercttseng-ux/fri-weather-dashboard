@@ -47,8 +47,12 @@ const App = (() => {
     try {
       _weatherData = await API.fetchWeather();
       WeatherUI.render(_weatherData);
-      await DB.saveWeather(_weatherData);
       weatherOk = true;
+      // save to DB separately so Supabase errors don't block display
+      DB.saveWeather(_weatherData).catch(e => {
+        console.warn('[Supabase] weather save skipped:', e.message);
+        _showDbHint();
+      });
     } catch (e) {
       console.error('Weather fetch error:', e);
       Toast.show('氣象資料取得失敗：' + e.message, 'danger');
@@ -57,9 +61,12 @@ const App = (() => {
     try {
       _rainfallData = await API.fetchRainfall();
       RainfallUI.render(_rainfallData);
-      await DB.saveRainfall(_rainfallData);
       RankingUI.render();
       rainfallOk = true;
+      DB.saveRainfall(_rainfallData).catch(e => {
+        console.warn('[Supabase] rainfall save skipped:', e.message);
+        _showDbHint();
+      });
     } catch (e) {
       console.error('Rainfall fetch error:', e);
       Toast.show('雨量資料取得失敗：' + e.message, 'danger');
@@ -103,6 +110,14 @@ const App = (() => {
     // Trigger lazy renders
     if (tabId === 'tabRanking') RankingUI.render();
     if (tabId === 'tabUpload')  UploadUI.refreshStats();
+  }
+
+  let _dbHintShown = false;
+  function _showDbHint() {
+    if (_dbHintShown) return;
+    _dbHintShown = true;
+    const el = document.getElementById('dbHintBanner');
+    if (el) el.classList.remove('d-none');
   }
 
   function setStatus(state, text) {

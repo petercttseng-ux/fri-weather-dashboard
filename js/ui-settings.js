@@ -38,9 +38,10 @@ const SettingsUI = (() => {
     if (el('settingInterval'))        el('settingInterval').value        = cfg.autoRefreshMin || 30;
     if (el('settingWeatherEndpoint')) el('settingWeatherEndpoint').value = cfg.weatherEndpoint;
     if (el('settingRainfallEndpoint'))el('settingRainfallEndpoint').value= cfg.rainfallEndpoint;
-    if (el('settingSupabaseUrl'))     el('settingSupabaseUrl').value     = cfg.supabaseUrl || '';
-    if (el('settingSupabaseKey'))     el('settingSupabaseKey').value     = cfg.supabaseKey || '';
-    if (el('settingRetention'))       el('settingRetention').value       = cfg.retentionDays || 30;
+    if (el('settingSupabaseUrl'))        el('settingSupabaseUrl').value        = cfg.supabaseUrl        || '';
+    if (el('settingSupabaseKey'))        el('settingSupabaseKey').value        = cfg.supabaseKey        || '';
+    if (el('settingSupabaseServiceKey')) el('settingSupabaseServiceKey').value = cfg.supabaseServiceKey || '';
+    if (el('settingRetention'))          el('settingRetention').value          = cfg.retentionDays      || 30;
     if (el('settingApiKey'))          el('settingApiKey').type           = 'password';
   }
 
@@ -64,12 +65,27 @@ const SettingsUI = (() => {
     App.scheduleRefresh();
   }
 
+  function toggleServiceKey() {
+    const inp  = document.getElementById('settingSupabaseServiceKey');
+    const icon = document.getElementById('eyeServiceIcon');
+    if (!inp) return;
+    if (inp.type === 'password') { inp.type = 'text';     icon.className = 'bi bi-eye-slash'; }
+    else                         { inp.type = 'password'; icon.className = 'bi bi-eye'; }
+  }
+
   function saveSupabase() {
-    const url = document.getElementById('settingSupabaseUrl')?.value?.trim();
-    const key = document.getElementById('settingSupabaseKey')?.value?.trim();
-    Config.save({ supabaseUrl: url, supabaseKey: key });
+    const url        = document.getElementById('settingSupabaseUrl')?.value?.trim();
+    const key        = document.getElementById('settingSupabaseKey')?.value?.trim();
+    const serviceKey = document.getElementById('settingSupabaseServiceKey')?.value?.trim();
+    Config.save({ supabaseUrl: url, supabaseKey: key, supabaseServiceKey: serviceKey });
     resetSupabaseClient();
-    Toast.show('Supabase 設定已儲存', 'success');
+    const hasService = !!serviceKey;
+    Toast.show(
+      hasService
+        ? '✓ Supabase 設定已儲存（使用 service_role key，可繞過 RLS）'
+        : 'Supabase 設定已儲存（僅 anon key，寫入需停用 RLS）',
+      hasService ? 'success' : 'warning'
+    );
   }
 
   async function testSupabase() {
@@ -135,5 +151,5 @@ const SettingsUI = (() => {
       });
   }
 
-  return { init, toggleKey, saveCWA, saveSupabase, testSupabase, showSqlScript, showRlsFix, copyRlsFix, copySql, clearLocal, exportLocal };
+  return { init, toggleKey, toggleServiceKey, saveCWA, saveSupabase, testSupabase, showSqlScript, showRlsFix, copyRlsFix, copySql, clearLocal, exportLocal };
 })();
