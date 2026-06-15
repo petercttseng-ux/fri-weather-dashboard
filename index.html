@@ -276,53 +276,118 @@
 
   <!-- ── TAB: 歷史資料上傳 ── -->
   <div id="tabUpload" class="tab-pane d-none">
-    <div class="row g-3">
-      <div class="col-md-6">
-        <div class="card fri-card">
-          <div class="card-header"><i class="bi bi-upload me-2"></i>上傳歷史氣象資料</div>
-          <div class="card-body">
-            <div class="mb-3">
-              <label class="form-label">資料類型</label>
-              <select class="form-select" id="uploadType">
-                <option value="weather">氣象觀測資料</option>
-                <option value="rainfall">雨量觀測資料</option>
-              </select>
+
+    <!-- 取得歷史資料說明 -->
+    <div class="card fri-card mb-3">
+      <div class="card-header"><i class="bi bi-info-circle me-2"></i>如何取得歷史氣象資料？</div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <div class="border rounded p-3 h-100 text-center">
+              <div class="fs-2 mb-2">🤖</div>
+              <div class="fw-bold mb-1">方法一：自動累積（推薦）</div>
+              <div class="text-muted small mb-2">開啟本儀表板後每次點擊「更新」或自動更新，系統即自動將逐時資料存入本機。<br>設定自動更新間隔 10～30 分鐘，運行一段時間後即可累積歷史資料。</div>
+              <button class="btn btn-primary btn-sm" onclick="UploadUI.snapshot()">
+                <i class="bi bi-camera me-1"></i>立即儲存當前快照
+              </button>
+              <div class="text-muted" style="font-size:.75rem;margin-top:6px" id="snapshotStatus"></div>
             </div>
-            <div class="mb-3">
-              <label class="form-label">選擇檔案 (CSV / JSON)</label>
-              <input class="form-control" type="file" id="uploadFile" accept=".csv,.json" />
-              <div class="form-text">CSV格式：第一列為欄位名稱，時間欄位名稱為 ObsTime 或 DateTime</div>
+          </div>
+          <div class="col-md-4">
+            <div class="border rounded p-3 h-100 text-center">
+              <div class="fs-2 mb-2">🌐</div>
+              <div class="fw-bold mb-1">方法二：CWA 官網下載</div>
+              <div class="text-muted small mb-2">從中央氣象署歷史資料查詢服務下載過去的觀測 CSV，再上傳至本系統。</div>
+              <div class="d-grid gap-1">
+                <a href="https://e-service.cwa.gov.tw/HistoryDataQuery/" target="_blank" class="btn btn-outline-primary btn-sm">
+                  <i class="bi bi-box-arrow-up-right me-1"></i>雨量歷史資料查詢
+                </a>
+                <a href="https://opendata.cwa.gov.tw/dataset/observation/O-A0002-001" target="_blank" class="btn btn-outline-secondary btn-sm">
+                  <i class="bi bi-box-arrow-up-right me-1"></i>開放資料平台
+                </a>
+              </div>
             </div>
-            <div class="mb-3">
-              <label class="form-label">資料來源說明（選填）</label>
-              <input class="form-control" type="text" id="uploadNote" placeholder="例如：2024年颱風期間觀測資料" />
-            </div>
-            <button class="btn btn-primary" onclick="UploadUI.upload()"><i class="bi bi-cloud-upload me-2"></i>上傳至資料庫</button>
-            <div id="uploadProgress" class="mt-3 d-none">
-              <div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated" id="uploadBar" style="width:0%"></div></div>
-              <div class="text-muted small mt-1" id="uploadStatus"></div>
+          </div>
+          <div class="col-md-4">
+            <div class="border rounded p-3 h-100 text-center">
+              <div class="fs-2 mb-2">📂</div>
+              <div class="fw-bold mb-1">方法三：上傳自備資料</div>
+              <div class="text-muted small mb-2">若已有 CSV 或 JSON 格式的歷史氣象資料，可直接上傳。支援中英文欄位名稱。</div>
+              <div class="d-grid gap-1">
+                <button class="btn btn-outline-secondary btn-sm" onclick="UploadUI.downloadTemplate('rainfall')">
+                  <i class="bi bi-download me-1"></i>下載雨量CSV範本
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="UploadUI.downloadTemplate('weather')">
+                  <i class="bi bi-download me-1"></i>下載氣象CSV範本
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="row g-3">
+      <!-- 上傳表單 -->
       <div class="col-md-6">
         <div class="card fri-card">
-          <div class="card-header"><i class="bi bi-database me-2"></i>資料庫現有資料</div>
+          <div class="card-header"><i class="bi bi-upload me-2"></i>上傳歷史資料檔案</div>
+          <div class="card-body">
+            <div class="mb-3">
+              <label class="form-label">資料類型</label>
+              <select class="form-select" id="uploadType">
+                <option value="rainfall">雨量觀測資料</option>
+                <option value="weather">氣象觀測資料</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">選擇檔案 (CSV / JSON)</label>
+              <input class="form-control" type="file" id="uploadFile" accept=".csv,.json,.txt" />
+              <div class="form-text">
+                支援欄位名稱：中英文皆可，時間欄為 <code>ObsTime</code>、<code>DateTime</code> 或 <code>時間</code>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">資料來源說明（選填）</label>
+              <input class="form-control" type="text" id="uploadNote" placeholder="例如：2024年颱風凱米觀測資料" />
+            </div>
+            <button class="btn btn-primary" onclick="UploadUI.upload()">
+              <i class="bi bi-cloud-upload me-2"></i>上傳至資料庫
+            </button>
+            <div id="uploadProgress" class="mt-3 d-none">
+              <div class="progress mb-1"><div class="progress-bar progress-bar-striped progress-bar-animated bg-success" id="uploadBar" style="width:0%"></div></div>
+              <div class="text-muted small" id="uploadStatus"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CSV格式說明 -->
+        <div class="card fri-card mt-3">
+          <div class="card-header"><i class="bi bi-file-earmark-text me-2"></i>CSV 欄位說明</div>
+          <div class="card-body">
+            <p class="small fw-bold mb-1">雨量資料欄位：</p>
+            <code class="small d-block bg-light p-2 rounded mb-2">ObsTime, StationId, StationName, County, Town,<br>Rain10Min, Rain1hr, Rain3hr, Rain6hr, Rain12hr, Rain24hr, Rain48hr</code>
+            <p class="small fw-bold mb-1">氣象資料欄位：</p>
+            <code class="small d-block bg-light p-2 rounded">ObsTime, StationId, StationName, County, Town,<br>Temperature, RelativeHumidity, Pressure, WindSpeed, WindDirection, Precipitation</code>
+            <div class="mt-2 text-muted" style="font-size:.75rem">
+              ✓ 支援 <code>YYYY-MM-DD HH:MM</code> 及 <code>YYYY/MM/DD HH:MM</code> 時間格式<br>
+              ✓ 欄位名稱不區分大小寫，支援中文欄名
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 資料庫狀態 -->
+      <div class="col-md-6">
+        <div class="card fri-card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-database me-2"></i>資料庫現有資料</span>
+            <button class="btn btn-outline-light btn-xs" onclick="UploadUI.refreshStats()"><i class="bi bi-arrow-clockwise"></i></button>
+          </div>
           <div class="card-body">
             <div id="dbStats">
               <div class="text-muted text-center py-3"><i class="bi bi-hourglass-split me-2"></i>載入中...</div>
             </div>
-          </div>
-        </div>
-        <div class="card fri-card mt-3">
-          <div class="card-header"><i class="bi bi-question-circle me-2"></i>CSV格式說明</div>
-          <div class="card-body">
-            <p class="small mb-2"><strong>氣象資料欄位：</strong></p>
-            <code class="small d-block bg-light p-2 rounded">ObsTime,StationId,StationName,County,Town,Temperature,RelativeHumidity,Pressure,WindSpeed,WindDirection,Precipitation</code>
-            <p class="small mt-3 mb-2"><strong>雨量資料欄位：</strong></p>
-            <code class="small d-block bg-light p-2 rounded">ObsTime,StationId,StationName,County,Town,Rain10Min,Rain1hr,Rain3hr,Rain6hr,Rain12hr,Rain24hr,Rain48hr</code>
-            <button class="btn btn-outline-secondary btn-sm mt-3" onclick="UploadUI.downloadTemplate('weather')"><i class="bi bi-download me-1"></i>氣象範本</button>
-            <button class="btn btn-outline-secondary btn-sm mt-3 ms-2" onclick="UploadUI.downloadTemplate('rainfall')"><i class="bi bi-download me-1"></i>雨量範本</button>
           </div>
         </div>
       </div>

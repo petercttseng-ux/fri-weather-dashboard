@@ -313,5 +313,29 @@ const UploadUI = (() => {
     if (sta) sta.textContent = msg;
   }
 
-  return { upload, refreshStats, downloadTemplate };
+  /* 立即將目前 API 快取資料存入 DB */
+  async function snapshot() {
+    const statusEl = document.getElementById('snapshotStatus');
+    if (statusEl) statusEl.textContent = '儲存中...';
+    try {
+      const w = App.getWeatherData();
+      const r = App.getRainfallData();
+      if (!w.length && !r.length) {
+        if (statusEl) statusEl.textContent = '⚠ 請先點擊「更新」載入即時資料';
+        Toast.show('尚無即時資料，請先點「更新」', 'warning');
+        return;
+      }
+      if (w.length) await _saveLocal('weather',  w);
+      if (r.length) await _saveLocal('rainfall', r);
+      const now = new Date().toLocaleString('zh-TW');
+      if (statusEl) statusEl.textContent = `✓ 已儲存 ${w.length} 筆氣象 / ${r.length} 筆雨量（${now}）`;
+      Toast.show(`快照完成：氣象 ${w.length} 站、雨量 ${r.length} 站`, 'success');
+      await refreshStats();
+    } catch (e) {
+      if (statusEl) statusEl.textContent = '✗ 儲存失敗：' + e.message;
+      Toast.show('快照失敗：' + e.message, 'danger');
+    }
+  }
+
+  return { upload, snapshot, refreshStats, downloadTemplate };
 })();

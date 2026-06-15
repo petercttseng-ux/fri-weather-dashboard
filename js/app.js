@@ -127,7 +127,10 @@ const App = (() => {
     if (txt) txt.textContent = text;
   }
 
-  return { init, fetchAll, scheduleRefresh, switchTab };
+  function getWeatherData()  { return _weatherData; }
+  function getRainfallData() { return _rainfallData; }
+
+  return { init, fetchAll, scheduleRefresh, switchTab, getWeatherData, getRainfallData };
 })();
 
 /* ── Bootstrap ── */
