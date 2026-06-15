@@ -24,17 +24,19 @@ function resetSupabaseClient() { _sbClient = null; }
 
 /* ── SQL script for Supabase setup ── */
 const SUPABASE_SQL = `-- ============================================================
--- 農業部水產試驗所 氣象監測儀表板 — Supabase 建表腳本 v3
+-- 農業部水產試驗所 氣象監測儀表板 — Supabase 建表腳本 v4
 -- 請在 Supabase → SQL Editor 中執行此完整腳本
--- 注意：會刪除並重建 weather_obs 及 rainfall_obs 資料表
+-- 注意：會刪除並重建資料表（舊資料將清除）
 -- ============================================================
 
--- 刪除舊表（含所有舊欄位定義）
+-- 1. 刪除舊表（無論欄位名稱為何）
+DROP TABLE IF EXISTS rainfall_observations CASCADE;
+DROP TABLE IF EXISTS weather_observations  CASCADE;
 DROP TABLE IF EXISTS rainfall_obs CASCADE;
 DROP TABLE IF EXISTS weather_obs  CASCADE;
 
--- 氣象觀測資料表
-CREATE TABLE weather_obs (
+-- 2. 建立氣象觀測資料表
+CREATE TABLE weather_observations (
   id            BIGSERIAL    PRIMARY KEY,
   observed_at   TIMESTAMPTZ  NOT NULL,
   station_id    TEXT         NOT NULL,
@@ -52,11 +54,11 @@ CREATE TABLE weather_obs (
   created_at    TIMESTAMPTZ  DEFAULT NOW(),
   UNIQUE (observed_at, station_id)
 );
-CREATE INDEX idx_weather_time   ON weather_obs(observed_at);
-CREATE INDEX idx_weather_county ON weather_obs(county);
+CREATE INDEX idx_weather_obs_time   ON weather_observations(observed_at);
+CREATE INDEX idx_weather_obs_county ON weather_observations(county);
 
--- 雨量觀測資料表
-CREATE TABLE rainfall_obs (
+-- 3. 建立雨量觀測資料表
+CREATE TABLE rainfall_observations (
   id           BIGSERIAL    PRIMARY KEY,
   observed_at  TIMESTAMPTZ  NOT NULL,
   station_id   TEXT         NOT NULL,
@@ -74,19 +76,31 @@ CREATE TABLE rainfall_obs (
   created_at   TIMESTAMPTZ  DEFAULT NOW(),
   UNIQUE (observed_at, station_id)
 );
-CREATE INDEX idx_rainfall_time   ON rainfall_obs(observed_at);
-CREATE INDEX idx_rainfall_county ON rainfall_obs(county);
+CREATE INDEX idx_rainfall_obs_time   ON rainfall_observations(observed_at);
+CREATE INDEX idx_rainfall_obs_county ON rainfall_observations(county);
 
--- Row Level Security（允許公開讀寫）
-ALTER TABLE weather_obs  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE rainfall_obs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON weather_obs  FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all" ON rainfall_obs FOR ALL USING (true) WITH CHECK (true);
+-- 4. 授予 anon / authenticated 角色讀寫權限
+GRANT ALL ON weather_observations   TO anon, authenticated;
+GRANT ALL ON rainfall_observations  TO anon, authenticated;
+GRANT USAGE, SELECT ON SEQUENCE weather_observations_id_seq  TO anon, authenticated;
+GRANT USAGE, SELECT ON SEQUENCE rainfall_observations_id_seq TO anon, authenticated;
 
--- 驗證欄位
-SELECT column_name, data_type
+-- 5. 啟用 Row Level Security 並建立允許所有操作的政策
+ALTER TABLE weather_observations  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rainfall_observations ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow all anon" ON weather_observations;
+DROP POLICY IF EXISTS "Allow all anon" ON rainfall_observations;
+CREATE POLICY "Allow all anon" ON weather_observations
+  FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all anon" ON rainfall_observations
+  FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+-- 6. 驗證（執行後請確認兩張表均有 observed_at 欄位）
+SELECT table_name, column_name, data_type
 FROM information_schema.columns
-WHERE table_name IN ('weather_obs','rainfall_obs')
+WHERE table_name IN ('weather_observations','rainfall_observations')
+  AND column_name IN ('observed_at','station_id')
 ORDER BY table_name, ordinal_position;
 `;
 
@@ -126,7 +140,7 @@ const DB = {
     }));
     try {
       const { error } = await sb
-        .from('weather_obs')
+        .from('weather_observations')
         .upsert(rows, { onConflict: 'observed_at,station_id' });
       if (error) console.warn('Supabase weather upsert error:', error.message, error.details);
     } catch (e) { console.warn('Supabase weather upsert exception:', e.message); }
@@ -165,7 +179,7 @@ const DB = {
     }));
     try {
       const { error } = await sb
-        .from('rainfall_obs')
+        .from('rainfall_observations')
         .upsert(rows, { onConflict: 'observed_at,station_id' });
       if (error) console.warn('Supabase rainfall upsert error:', error.message, error.details);
     } catch (e) { console.warn('Supabase rainfall upsert exception:', e.message); }
@@ -180,7 +194,7 @@ const DB = {
     if (sb) {
       try {
         const { data, error } = await sb
-          .from('rainfall_obs')
+          .from('rainfall_observations')
           .select('*')
           .gte('observed_at', start)
           .lte('observed_at', end)
@@ -217,7 +231,7 @@ const DB = {
     if (!sb) return { ok: false, msg: '未設定 Supabase 連線' };
     try {
       const { data, error } = await sb
-        .from('rainfall_obs')
+        .from('rainfall_observations')
         .select('id, observed_at')
         .limit(1);
       if (error) return { ok: false, msg: error.message };
