@@ -36,7 +36,7 @@ async function fetchJSON(url) {
   return resp.json();
 }
 
-// ── CWA Parsers ──────────────────────────────────────────────────────────
+// ── CWA Parsers ────────────────────────────────────────────────────────
 
 function parseWeatherStation(s) {
   const ow = s.WeatherElement || {};
@@ -134,7 +134,7 @@ async function main() {
     process.exit(0);
   }
 
-  // �� Supabase 客戶端配置 WebSocket（Node.js 20+ 相容性）
+  // ── 為 Node.js 20 提供 WebSocket 支援 ──
   if (typeof globalThis.WebSocket === 'undefined') {
     globalThis.WebSocket = WebSocket;
   }
