@@ -313,27 +313,44 @@ const UploadUI = (() => {
     if (sta) sta.textContent = msg;
   }
 
-  /* 立即將目前 API 快取資料存入 DB */
+  /* 立即快照：若無資料則先從 API 抓取，再存入 DB */
   async function snapshot() {
     const statusEl = document.getElementById('snapshotStatus');
-    if (statusEl) statusEl.textContent = '儲存中...';
+    const btn = document.querySelector('[onclick="UploadUI.snapshot()"]');
+    if (statusEl) statusEl.textContent = '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>處理中...'; }
+
     try {
-      const w = App.getWeatherData();
-      const r = App.getRainfallData();
+      let w = App.getWeatherData();
+      let r = App.getRainfallData();
+
+      // 若尚無資料，自動先抓 API
       if (!w.length && !r.length) {
-        if (statusEl) statusEl.textContent = '⚠ 請先點擊「更新」載入即時資料';
-        Toast.show('尚無即時資料，請先點「更新」', 'warning');
-        return;
+        if (statusEl) statusEl.textContent = '正在從 CWA API 取得即時資料...';
+        try {
+          w = await API.fetchWeather();
+          r = await API.fetchRainfall();
+        } catch (e) {
+          throw new Error('API 取得失敗：' + e.message);
+        }
       }
+
+      if (!w.length && !r.length) throw new Error('API 未回傳任何資料，請確認 API 金鑰是否正確');
+
+      if (statusEl) statusEl.textContent = `取得 ${w.length} 站氣象、${r.length} 站雨量，儲存中...`;
+
       if (w.length) await _saveLocal('weather',  w);
       if (r.length) await _saveLocal('rainfall', r);
-      const now = new Date().toLocaleString('zh-TW');
-      if (statusEl) statusEl.textContent = `✓ 已儲存 ${w.length} 筆氣象 / ${r.length} 筆雨量（${now}）`;
-      Toast.show(`快照完成：氣象 ${w.length} 站、雨量 ${r.length} 站`, 'success');
+
+      const now = new Date().toLocaleString('zh-TW', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+      if (statusEl) statusEl.textContent = `✓ ${now} 已存 ${w.length} 氣象 / ${r.length} 雨量`;
+      Toast.show(`快照完成：氣象 ${w.length} 站、雨量 ${r.length} 站已存入本機`, 'success');
       await refreshStats();
     } catch (e) {
-      if (statusEl) statusEl.textContent = '✗ 儲存失敗：' + e.message;
+      if (statusEl) statusEl.textContent = '✗ ' + e.message;
       Toast.show('快照失敗：' + e.message, 'danger');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-camera me-1"></i>立即儲存當前快照'; }
     }
   }
 

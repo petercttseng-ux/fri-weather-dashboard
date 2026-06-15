@@ -1,10 +1,15 @@
 /* ── IndexedDB (Dexie) + Supabase Cloud DB ── */
 
-/* Local DB */
+/* Local DB — v3: compound primary key [stationId+obsTime] prevents duplicates */
 const localDB = new Dexie('FriWeatherDB');
 localDB.version(2).stores({
   weather:  '++id, stationId, obsTime, county, town',
   rainfall: '++id, stationId, obsTime, county, town',
+  uploads:  '++id, type, uploadedAt, note'
+});
+localDB.version(3).stores({
+  weather:  '[stationId+obsTime], obsTime, county, town',
+  rainfall: '[stationId+obsTime], obsTime, county, town',
   uploads:  '++id, type, uploadedAt, note'
 });
 
@@ -120,12 +125,12 @@ const DB = {
   async saveWeather(records) {
     if (!records || !records.length) return;
 
-    // local IndexedDB
+    // local IndexedDB — compound key [stationId+obsTime] deduplicates automatically
     await localDB.weather.bulkPut(records.map(r => ({
-      stationId: r.stationId,
-      obsTime:   r.obsTime,
-      county:    r.county,
-      town:      r.town,
+      stationId: r.stationId || 'UNKNOWN',
+      obsTime:   r.obsTime   || new Date().toISOString(),
+      county:    r.county    || '',
+      town:      r.town      || '',
       data:      r
     })));
 
@@ -159,12 +164,12 @@ const DB = {
   async saveRainfall(records) {
     if (!records || !records.length) return;
 
-    // local IndexedDB
+    // local IndexedDB — compound key [stationId+obsTime] deduplicates automatically
     await localDB.rainfall.bulkPut(records.map(r => ({
-      stationId: r.stationId,
-      obsTime:   r.obsTime,
-      county:    r.county,
-      town:      r.town,
+      stationId: r.stationId || 'UNKNOWN',
+      obsTime:   r.obsTime   || new Date().toISOString(),
+      county:    r.county    || '',
+      town:      r.town      || '',
       data:      r
     })));
 
