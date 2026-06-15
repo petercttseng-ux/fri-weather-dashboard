@@ -8,7 +8,7 @@ localDB.version(2).stores({
   uploads:  '++id, type, uploadedAt, note'
 });
 
-/* ── Supabase client (initialised when config is available) ── */
+/* ── Supabase client ── */
 let _sbClient = null;
 
 function getSupabase() {
@@ -23,34 +23,49 @@ function getSupabase() {
 function resetSupabaseClient() { _sbClient = null; }
 
 /* ── SQL script for Supabase setup ── */
-const SUPABASE_SQL = `-- 在 Supabase SQL Editor 執行此腳本建立資料表
+const SUPABASE_SQL = `-- ============================================================
+-- 農業部水產試驗所 氣象監測儀表板 — Supabase 建表腳本
+-- 請在 Supabase → SQL Editor 中執行此腳本
+-- ============================================================
+
+-- 若舊版資料表存在，先刪除重建（首次使用可略過 DROP）
+-- DROP TABLE IF EXISTS weather_obs;
+-- DROP TABLE IF EXISTS rainfall_obs;
 
 -- 氣象觀測資料表
 CREATE TABLE IF NOT EXISTS weather_obs (
-  id           BIGSERIAL PRIMARY KEY,
-  obs_time     TIMESTAMPTZ NOT NULL,
-  station_id   TEXT NOT NULL,
-  station_name TEXT,
-  county       TEXT,
-  town         TEXT,
-  temperature  NUMERIC,
-  humidity     NUMERIC,
-  pressure     NUMERIC,
-  wind_speed   NUMERIC,
-  wind_dir     NUMERIC,
-  gust         NUMERIC,
+  id            BIGSERIAL PRIMARY KEY,
+  observed_at   TIMESTAMPTZ NOT NULL,
+  station_id    TEXT        NOT NULL,
+  station_name  TEXT,
+  county        TEXT,
+  town          TEXT,
+  temperature   NUMERIC,
+  humidity      NUMERIC,
+  pressure      NUMERIC,
+  wind_speed    NUMERIC,
+  wind_dir      NUMERIC,
+  gust          NUMERIC,
   precipitation NUMERIC,
-  sunshine_dur NUMERIC,
-  created_at   TIMESTAMPTZ DEFAULT NOW()
+  sunshine_dur  NUMERIC,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_weather_time ON weather_obs(obs_time);
+
+-- 唯一約束（供 upsert 使用）
+ALTER TABLE weather_obs
+  DROP CONSTRAINT IF EXISTS weather_obs_observed_at_station_id_key;
+ALTER TABLE weather_obs
+  ADD CONSTRAINT weather_obs_observed_at_station_id_key
+  UNIQUE (observed_at, station_id);
+
+CREATE INDEX IF NOT EXISTS idx_weather_time   ON weather_obs(observed_at);
 CREATE INDEX IF NOT EXISTS idx_weather_county ON weather_obs(county);
 
 -- 雨量觀測資料表
 CREATE TABLE IF NOT EXISTS rainfall_obs (
   id           BIGSERIAL PRIMARY KEY,
-  obs_time     TIMESTAMPTZ NOT NULL,
-  station_id   TEXT NOT NULL,
+  observed_at  TIMESTAMPTZ NOT NULL,
+  station_id   TEXT        NOT NULL,
   station_name TEXT,
   county       TEXT,
   town         TEXT,
@@ -64,93 +79,138 @@ CREATE TABLE IF NOT EXISTS rainfall_obs (
   rain_month   NUMERIC,
   created_at   TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_rainfall_time ON rainfall_obs(obs_time);
+
+-- 唯一約束（供 upsert 使用）
+ALTER TABLE rainfall_obs
+  DROP CONSTRAINT IF EXISTS rainfall_obs_observed_at_station_id_key;
+ALTER TABLE rainfall_obs
+  ADD CONSTRAINT rainfall_obs_observed_at_station_id_key
+  UNIQUE (observed_at, station_id);
+
+CREATE INDEX IF NOT EXISTS idx_rainfall_time   ON rainfall_obs(observed_at);
 CREATE INDEX IF NOT EXISTS idx_rainfall_county ON rainfall_obs(county);
 
--- 啟用 Row Level Security（設定公開讀寫，可依需求調整）
+-- Row Level Security（允許公開讀寫，可依機關需求調整）
 ALTER TABLE weather_obs  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rainfall_obs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow all" ON weather_obs;
+DROP POLICY IF EXISTS "Allow all" ON rainfall_obs;
 CREATE POLICY "Allow all" ON weather_obs  FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON rainfall_obs FOR ALL USING (true) WITH CHECK (true);
 `;
 
 /* ── DB API ── */
 const DB = {
+
   /* Save weather batch to local + cloud */
   async saveWeather(records) {
-    // local
+    if (!records || !records.length) return;
+
+    // local IndexedDB
     await localDB.weather.bulkPut(records.map(r => ({
-      stationId: r.stationId, obsTime: r.obsTime,
-      county: r.county, town: r.town, data: r
+      stationId: r.stationId,
+      obsTime:   r.obsTime,
+      county:    r.county,
+      town:      r.town,
+      data:      r
     })));
 
-    // cloud
+    // cloud Supabase
     const sb = getSupabase();
-    if (sb) {
-      const rows = records.map(r => ({
-        obs_time: r.obsTime, station_id: r.stationId,
-        station_name: r.stationName, county: r.county, town: r.town,
-        temperature: r.temperature, humidity: r.humidity,
-        pressure: r.pressure, wind_speed: r.windSpeed,
-        wind_dir: r.windDirection, gust: r.gustInfo,
-        precipitation: r.precipitation, sunshine_dur: r.sunshineDuration
-      }));
-      try {
-        await sb.from('weather_obs').upsert(rows, { onConflict: 'obs_time,station_id' });
-      } catch (e) { console.warn('Supabase weather upsert:', e.message); }
-    }
+    if (!sb) return;
+    const rows = records.map(r => ({
+      observed_at:  r.obsTime,
+      station_id:   r.stationId,
+      station_name: r.stationName,
+      county:       r.county,
+      town:         r.town,
+      temperature:  r.temperature,
+      humidity:     r.relativeHumidity,
+      pressure:     r.pressure,
+      wind_speed:   r.windSpeed,
+      wind_dir:     r.windDirection,
+      gust:         r.gustInfo,
+      precipitation:r.precipitation,
+      sunshine_dur: r.sunshineDuration
+    }));
+    try {
+      const { error } = await sb
+        .from('weather_obs')
+        .upsert(rows, { onConflict: 'observed_at,station_id' });
+      if (error) console.warn('Supabase weather upsert error:', error.message, error.details);
+    } catch (e) { console.warn('Supabase weather upsert exception:', e.message); }
   },
 
   /* Save rainfall batch to local + cloud */
   async saveRainfall(records) {
+    if (!records || !records.length) return;
+
+    // local IndexedDB
     await localDB.rainfall.bulkPut(records.map(r => ({
-      stationId: r.stationId, obsTime: r.obsTime,
-      county: r.county, town: r.town, data: r
+      stationId: r.stationId,
+      obsTime:   r.obsTime,
+      county:    r.county,
+      town:      r.town,
+      data:      r
     })));
 
+    // cloud Supabase
     const sb = getSupabase();
-    if (sb) {
-      const rows = records.map(r => ({
-        obs_time: r.obsTime, station_id: r.stationId,
-        station_name: r.stationName, county: r.county, town: r.town,
-        rain_10min: r.rain10Min, rain_1hr: r.rain1hr,
-        rain_3hr: r.rain3hr, rain_6hr: r.rain6hr,
-        rain_12hr: r.rain12hr, rain_24hr: r.rain24hr,
-        rain_48hr: r.rain48hr, rain_month: r.rainMonth
-      }));
-      try {
-        await sb.from('rainfall_obs').upsert(rows, { onConflict: 'obs_time,station_id' });
-      } catch (e) { console.warn('Supabase rainfall upsert:', e.message); }
-    }
+    if (!sb) return;
+    const rows = records.map(r => ({
+      observed_at:  r.obsTime,
+      station_id:   r.stationId,
+      station_name: r.stationName,
+      county:       r.county,
+      town:         r.town,
+      rain_10min:   r.rain10Min,
+      rain_1hr:     r.rain1hr,
+      rain_3hr:     r.rain3hr,
+      rain_6hr:     r.rain6hr,
+      rain_12hr:    r.rain12hr,
+      rain_24hr:    r.rain24hr,
+      rain_48hr:    r.rain48hr,
+      rain_month:   r.rainMonth
+    }));
+    try {
+      const { error } = await sb
+        .from('rainfall_obs')
+        .upsert(rows, { onConflict: 'observed_at,station_id' });
+      if (error) console.warn('Supabase rainfall upsert error:', error.message, error.details);
+    } catch (e) { console.warn('Supabase rainfall upsert exception:', e.message); }
   },
 
-  /* Query rainfall in time range from local DB */
+  /* Query rainfall in time range — cloud first, then local fallback */
   async queryRainfallRange(startMs, endMs) {
     const start = new Date(startMs).toISOString();
     const end   = new Date(endMs).toISOString();
 
-    // try cloud first
     const sb = getSupabase();
     if (sb) {
       try {
         const { data, error } = await sb
           .from('rainfall_obs')
           .select('*')
-          .gte('obs_time', start)
-          .lte('obs_time', end)
-          .order('obs_time', { ascending: true });
-        if (!error && data && data.length > 0) return data.map(mapFromCloud);
-      } catch (e) { console.warn('Supabase query:', e.message); }
+          .gte('observed_at', start)
+          .lte('observed_at', end)
+          .order('observed_at', { ascending: true });
+        if (error) {
+          console.warn('Supabase range query error:', error.message);
+        } else if (data && data.length > 0) {
+          return data.map(mapFromCloud);
+        }
+      } catch (e) { console.warn('Supabase range query exception:', e.message); }
     }
 
-    // fallback local
+    // fallback: local IndexedDB
     const all = await localDB.rainfall
       .where('obsTime').between(start, end, true, true)
       .toArray();
     return all.map(r => r.data);
   },
 
-  /* DB stats */
+  /* DB statistics */
   async getStats() {
     const wCount = await localDB.weather.count();
     const rCount = await localDB.rainfall.count();
@@ -164,16 +224,20 @@ const DB = {
   /* Test Supabase connection */
   async testSupabase() {
     const sb = getSupabase();
-    if (!sb) return false;
+    if (!sb) return { ok: false, msg: '未設定 Supabase 連線' };
     try {
-      const { error } = await sb.from('rainfall_obs').select('id').limit(1);
-      return !error;
-    } catch { return false; }
+      const { data, error } = await sb
+        .from('rainfall_obs')
+        .select('id, observed_at')
+        .limit(1);
+      if (error) return { ok: false, msg: error.message };
+      return { ok: true, msg: '連線成功' };
+    } catch (e) { return { ok: false, msg: e.message }; }
   },
 
-  /* Clear local data older than retentionDays */
+  /* Prune local data older than retentionDays */
   async pruneLocal() {
-    const days = Config.get('retentionDays');
+    const days = parseInt(Config.get('retentionDays')) || 0;
     if (!days) return;
     const cutoff = new Date(Date.now() - days * 86400000).toISOString();
     await localDB.weather.where('obsTime').below(cutoff).delete();
@@ -187,13 +251,21 @@ const DB = {
   }
 };
 
+/* Map Supabase row → app record */
 function mapFromCloud(r) {
   return {
-    obsTime: r.obs_time, stationId: r.station_id,
-    stationName: r.station_name, county: r.county, town: r.town,
-    rain10Min: r.rain_10min, rain1hr: r.rain_1hr,
-    rain3hr: r.rain_3hr, rain6hr: r.rain_6hr,
-    rain12hr: r.rain_12hr, rain24hr: r.rain_24hr,
-    rain48hr: r.rain_48hr, rainMonth: r.rain_month
+    obsTime:     r.observed_at,
+    stationId:   r.station_id,
+    stationName: r.station_name,
+    county:      r.county,
+    town:        r.town,
+    rain10Min:   r.rain_10min,
+    rain1hr:     r.rain_1hr,
+    rain3hr:     r.rain_3hr,
+    rain6hr:     r.rain_6hr,
+    rain12hr:    r.rain_12hr,
+    rain24hr:    r.rain_24hr,
+    rain48hr:    r.rain_48hr,
+    rainMonth:   r.rain_month
   };
 }

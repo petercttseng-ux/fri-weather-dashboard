@@ -53,8 +53,12 @@ const SettingsUI = (() => {
     Config.save({ supabaseUrl: url, supabaseKey: key });
     resetSupabaseClient();
     Toast.show('連線測試中...', 'info');
-    const ok = await DB.testSupabase();
-    Toast.show(ok ? '✓ Supabase 連線成功！' : '✗ 連線失敗，請確認設定及資料表是否存在', ok ? 'success' : 'danger');
+    const result = await DB.testSupabase();
+    if (result.ok) {
+      Toast.show('✓ Supabase 連線成功！資料表結構正常。', 'success');
+    } else {
+      Toast.show(`✗ 連線失敗：${result.msg}。請確認已執行建表SQL腳本，且欄位名稱包含 observed_at。`, 'danger');
+    }
   }
 
   function showSqlScript() {
