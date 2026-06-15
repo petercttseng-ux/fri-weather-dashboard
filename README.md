@@ -13,6 +13,42 @@
 5. 若要使用免費雲端資料庫，建立 Supabase free project，執行頁面中的建表 SQL，並填入 Project URL 與 anon key。
 6. 若沒有設定 Supabase，系統會以瀏覽器 IndexedDB 儲存資料，方便本機測試。
 
+## 歷史 CSV 欄位
+
+CSV 至少需要一個時間欄位，例如 `observed_at`、`observedAt`、`ObsTime`、`DateTime`、`觀測時間`、`資料時間` 或 `時間`。
+
+可使用英文欄位：
+
+- `station_id`
+- `station_name`
+- `county`
+- `town`
+- `observed_at`
+- `rain_1h`
+- `rain_24h`
+- `rain_48h`
+- `temperature`
+- `humidity`
+- `wind_speed`
+- `pressure`
+
+也可使用中文欄位：
+
+- `站號`
+- `測站名稱`
+- `縣市`
+- `鄉鎮`
+- `觀測時間`
+- `1小時雨量`
+- `24小時雨量`
+- `48小時雨量`
+- `溫度`
+- `濕度`
+- `風速`
+- `氣壓`
+
+支援一般西元時間、民國年時間如 `113/06/15 08:00`，以及 `202606150900` 這類緊湊格式。
+
 ## GitHub Pages 部署
 
 將本資料夾推送到 GitHub repository 後，可在 GitHub repository 的 Settings → Pages 選擇 `main` branch 與 root folder 發布。

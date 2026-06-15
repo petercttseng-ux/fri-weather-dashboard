@@ -28,7 +28,12 @@ const formatRain = (value) => value === null || value === undefined ? "--" : `${
 const formatMetric = (value, unit = "") => value === null || value === undefined ? "--" : `${Number(value).toFixed(1)}${unit}`;
 const parseTime = (value) => {
   if (!value) return null;
-  const date = new Date(value);
+  const raw = String(value).trim();
+  const normalized = raw
+    .replace(/^(\d{3})[/-](\d{1,2})[/-](\d{1,2})/, (_, year, month, day) => `${Number(year) + 1911}-${month}-${day}`)
+    .replace(/^(\d{4})(\d{2})(\d{2})[ T]?(\d{2})(\d{2})?$/, (_, year, month, day, hour, minute = "00") => `${year}-${month}-${day}T${hour}:${minute}`)
+    .replace(/\//g, "-");
+  const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date;
 };
 const toInputDateTime = (date) => {
@@ -175,21 +180,58 @@ function toDbRow(row) {
 }
 
 function fromDbRow(row) {
+  const normalized = normalizeImportedRow(row);
   return {
-    stationId: row.stationId || row.station_id || "",
-    stationName: row.stationName || row.station_name || "",
-    county: row.county || "",
-    town: row.town || "",
-    observedAt: row.observedAt || row.observed_at,
-    source: row.source || "history",
-    rain1h: numberOrNull(row.rain1h ?? row.rain_1h),
-    rain24h: numberOrNull(row.rain24h ?? row.rain_24h),
-    rain48h: numberOrNull(row.rain48h ?? row.rain_48h),
-    temperature: numberOrNull(row.temperature),
-    humidity: numberOrNull(row.humidity),
-    windSpeed: numberOrNull(row.windSpeed ?? row.wind_speed),
-    pressure: numberOrNull(row.pressure),
+    stationId: normalized.stationId,
+    stationName: normalized.stationName,
+    county: normalized.county,
+    town: normalized.town,
+    observedAt: normalized.observedAt,
+    source: normalized.source,
+    rain1h: numberOrNull(normalized.rain1h),
+    rain24h: numberOrNull(normalized.rain24h),
+    rain48h: numberOrNull(normalized.rain48h),
+    temperature: numberOrNull(normalized.temperature),
+    humidity: numberOrNull(normalized.humidity),
+    windSpeed: numberOrNull(normalized.windSpeed),
+    pressure: numberOrNull(normalized.pressure),
     payload: row.payload || row,
+  };
+}
+
+function normalizeKey(key) {
+  return String(key || "")
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[()\[\]{}（）％%]/g, "")
+    .replace(/[\s_-]+/g, "");
+}
+
+function pickValue(row, aliases) {
+  const lookup = new Map(Object.entries(row || {}).map(([key, value]) => [normalizeKey(key), value]));
+  for (const alias of aliases) {
+    const value = lookup.get(normalizeKey(alias));
+    if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+  }
+  return "";
+}
+
+function normalizeImportedRow(row) {
+  return {
+    stationId: pickValue(row, ["stationId", "station_id", "StationId", "StationID", "站號", "測站代碼", "測站編號"]),
+    stationName: pickValue(row, ["stationName", "station_name", "StationName", "測站", "測站名稱", "站名"]),
+    county: pickValue(row, ["county", "CountyName", "CITY", "縣市", "縣市名稱", "城市"]),
+    town: pickValue(row, ["town", "TownName", "TOWN", "鄉鎮", "鄉鎮市區", "行政區"]),
+    observedAt: pickValue(row, ["observedAt", "observed_at", "ObsTime", "DateTime", "time", "觀測時間", "資料時間", "時間"]),
+    source: pickValue(row, ["source", "資料來源"]) || "history",
+    rain1h: pickValue(row, ["rain1h", "rain_1h", "Past1hr", "Past1Hour", "HOUR_1", "RAIN", "1H", "1小時雨量", "時雨量", "雨量"]),
+    rain24h: pickValue(row, ["rain24h", "rain_24h", "Past24hr", "Past24Hour", "HOUR_24", "24H", "24小時雨量", "24小時累積雨量"]),
+    rain48h: pickValue(row, ["rain48h", "rain_48h", "Past48hr", "Past48Hour", "HOUR_48", "48H", "48小時雨量", "48小時累積雨量"]),
+    temperature: pickValue(row, ["temperature", "AirTemperature", "TEMP", "溫度", "氣溫"]),
+    humidity: pickValue(row, ["humidity", "RelativeHumidity", "HUMD", "相對濕度", "濕度"]),
+    windSpeed: pickValue(row, ["windSpeed", "wind_speed", "WindSpeed", "WDSD", "風速"]),
+    pressure: pickValue(row, ["pressure", "AirPressure", "PRES", "氣壓"]),
   };
 }
 
@@ -436,26 +478,72 @@ function renderDateRange() {
 }
 
 function parseCsv(text) {
-  const lines = text.trim().split(/\r?\n/).filter(Boolean);
-  const headers = lines.shift().split(",").map((x) => x.trim());
-  return lines.map((line) => {
-    const cells = line.match(/("([^"]|"")*"|[^,]*)/g).filter((_, index) => index % 2 === 0).map((cell) => cell.replace(/^"|"$/g, "").replace(/""/g, "\"").trim());
-    return Object.fromEntries(headers.map((header, index) => [header, cells[index] ?? ""]));
-  });
+  const rows = [];
+  let cell = "";
+  let row = [];
+  let quoted = false;
+  const source = String(text || "").replace(/^\uFEFF/, "");
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (quoted) {
+      if (char === "\"" && next === "\"") {
+        cell += "\"";
+        index += 1;
+      } else if (char === "\"") {
+        quoted = false;
+      } else {
+        cell += char;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      quoted = true;
+    } else if (char === ",") {
+      row.push(cell.trim());
+      cell = "";
+    } else if (char === "\n") {
+      row.push(cell.trim());
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else if (char !== "\r") {
+      cell += char;
+    }
+  }
+
+  if (cell || row.length) {
+    row.push(cell.trim());
+    rows.push(row);
+  }
+
+  const nonEmpty = rows.filter((items) => items.some((item) => String(item).trim() !== ""));
+  if (!nonEmpty.length) return [];
+  const headers = nonEmpty.shift().map((header) => header.replace(/^\uFEFF/, "").trim());
+  return nonEmpty.map((items) => Object.fromEntries(headers.map((header, index) => [header, items[index] ?? ""])));
 }
 
 async function importHistory(file) {
   if (!file) return;
-  const text = await file.text();
-  const raw = file.name.toLowerCase().endsWith(".json") ? JSON.parse(text) : parseCsv(text);
-  const rows = raw.map(fromDbRow).filter((row) => parseTime(row.observedAt));
-  if (!rows.length) {
-    toast("未找到可匯入的歷史資料。");
-    return;
+  try {
+    const text = await file.text();
+    const raw = file.name.toLowerCase().endsWith(".json") ? JSON.parse(text) : parseCsv(text);
+    const sourceRows = Array.isArray(raw) ? raw : raw?.records?.Station || raw?.records?.location || [];
+    const rows = sourceRows.map(fromDbRow).filter((row) => parseTime(row.observedAt));
+    if (!rows.length) {
+      toast("未找到可匯入的歷史資料。請確認 CSV 有觀測時間欄位。");
+      return;
+    }
+    await persistRows(rows);
+    await loadDatabaseRows();
+    toast(`已匯入 ${rows.length} 筆歷史資料。`);
+  } catch (error) {
+    console.error(error);
+    toast(`CSV 匯入失敗：${error.message}`);
+  } finally {
+    $("historyFile").value = "";
   }
-  await persistRows(rows);
-  await loadDatabaseRows();
-  toast(`已匯入 ${rows.length} 筆歷史資料。`);
 }
 
 function loadSampleData() {
