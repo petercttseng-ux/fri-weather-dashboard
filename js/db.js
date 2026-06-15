@@ -24,19 +24,20 @@ function resetSupabaseClient() { _sbClient = null; }
 
 /* ── SQL script for Supabase setup ── */
 const SUPABASE_SQL = `-- ============================================================
--- 農業部水產試驗所 氣象監測儀表板 — Supabase 建表腳本
--- 請在 Supabase → SQL Editor 中執行此腳本
+-- 農業部水產試驗所 氣象監測儀表板 — Supabase 建表腳本 v3
+-- 請在 Supabase → SQL Editor 中執行此完整腳本
+-- 注意：會刪除並重建 weather_obs 及 rainfall_obs 資料表
 -- ============================================================
 
--- 若舊版資料表存在，先刪除重建（首次使用可略過 DROP）
--- DROP TABLE IF EXISTS weather_obs;
--- DROP TABLE IF EXISTS rainfall_obs;
+-- 刪除舊表（含所有舊欄位定義）
+DROP TABLE IF EXISTS rainfall_obs CASCADE;
+DROP TABLE IF EXISTS weather_obs  CASCADE;
 
 -- 氣象觀測資料表
-CREATE TABLE IF NOT EXISTS weather_obs (
-  id            BIGSERIAL PRIMARY KEY,
-  observed_at   TIMESTAMPTZ NOT NULL,
-  station_id    TEXT        NOT NULL,
+CREATE TABLE weather_obs (
+  id            BIGSERIAL    PRIMARY KEY,
+  observed_at   TIMESTAMPTZ  NOT NULL,
+  station_id    TEXT         NOT NULL,
   station_name  TEXT,
   county        TEXT,
   town          TEXT,
@@ -48,24 +49,17 @@ CREATE TABLE IF NOT EXISTS weather_obs (
   gust          NUMERIC,
   precipitation NUMERIC,
   sunshine_dur  NUMERIC,
-  created_at    TIMESTAMPTZ DEFAULT NOW()
+  created_at    TIMESTAMPTZ  DEFAULT NOW(),
+  UNIQUE (observed_at, station_id)
 );
-
--- 唯一約束（供 upsert 使用）
-ALTER TABLE weather_obs
-  DROP CONSTRAINT IF EXISTS weather_obs_observed_at_station_id_key;
-ALTER TABLE weather_obs
-  ADD CONSTRAINT weather_obs_observed_at_station_id_key
-  UNIQUE (observed_at, station_id);
-
-CREATE INDEX IF NOT EXISTS idx_weather_time   ON weather_obs(observed_at);
-CREATE INDEX IF NOT EXISTS idx_weather_county ON weather_obs(county);
+CREATE INDEX idx_weather_time   ON weather_obs(observed_at);
+CREATE INDEX idx_weather_county ON weather_obs(county);
 
 -- 雨量觀測資料表
-CREATE TABLE IF NOT EXISTS rainfall_obs (
-  id           BIGSERIAL PRIMARY KEY,
-  observed_at  TIMESTAMPTZ NOT NULL,
-  station_id   TEXT        NOT NULL,
+CREATE TABLE rainfall_obs (
+  id           BIGSERIAL    PRIMARY KEY,
+  observed_at  TIMESTAMPTZ  NOT NULL,
+  station_id   TEXT         NOT NULL,
   station_name TEXT,
   county       TEXT,
   town         TEXT,
@@ -77,27 +71,23 @@ CREATE TABLE IF NOT EXISTS rainfall_obs (
   rain_24hr    NUMERIC,
   rain_48hr    NUMERIC,
   rain_month   NUMERIC,
-  created_at   TIMESTAMPTZ DEFAULT NOW()
+  created_at   TIMESTAMPTZ  DEFAULT NOW(),
+  UNIQUE (observed_at, station_id)
 );
+CREATE INDEX idx_rainfall_time   ON rainfall_obs(observed_at);
+CREATE INDEX idx_rainfall_county ON rainfall_obs(county);
 
--- 唯一約束（供 upsert 使用）
-ALTER TABLE rainfall_obs
-  DROP CONSTRAINT IF EXISTS rainfall_obs_observed_at_station_id_key;
-ALTER TABLE rainfall_obs
-  ADD CONSTRAINT rainfall_obs_observed_at_station_id_key
-  UNIQUE (observed_at, station_id);
-
-CREATE INDEX IF NOT EXISTS idx_rainfall_time   ON rainfall_obs(observed_at);
-CREATE INDEX IF NOT EXISTS idx_rainfall_county ON rainfall_obs(county);
-
--- Row Level Security（允許公開讀寫，可依機關需求調整）
+-- Row Level Security（允許公開讀寫）
 ALTER TABLE weather_obs  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rainfall_obs ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Allow all" ON weather_obs;
-DROP POLICY IF EXISTS "Allow all" ON rainfall_obs;
 CREATE POLICY "Allow all" ON weather_obs  FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all" ON rainfall_obs FOR ALL USING (true) WITH CHECK (true);
+
+-- 驗證欄位
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name IN ('weather_obs','rainfall_obs')
+ORDER BY table_name, ordinal_position;
 `;
 
 /* ── DB API ── */
