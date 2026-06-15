@@ -101,77 +101,179 @@ const UploadUI = (() => {
     }
   }
 
-  /* ── CSV Parser ── */
+  /* ── CSV Parser (auto-detects CWA MH format) ── */
   function parseCSV(text, type) {
-    // normalise line endings, strip BOM
     const clean = text.replace(/^﻿/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const lines = clean.split('\n').filter(l => l.trim());
-    if (lines.length < 2) throw new Error('CSV 至少需要標題列與一筆資料');
+    const lines  = clean.split('\n');
 
+    // ── Detect CWA MH Multifield Hourly Format ──
+    // Header comment lines start with '*', column title line starts with '#'
+    if (lines[0]?.trim().startsWith('*') || lines[0]?.trim().startsWith('﻿*')) {
+      return parseCWA_MH(lines, type);
+    }
+
+    // ── Standard CSV (first line = headers) ──
+    const dataLines = lines.filter(l => l.trim() && !l.trim().startsWith('#'));
+    if (dataLines.length < 2) throw new Error('CSV 至少需要標題列與一筆資料');
+    return parseStandardCSV(dataLines, type);
+  }
+
+  /* ── CWA MH Multifield Hourly Format parser ──
+     Header lines start with '*', column line starts with '#'
+     Time: yyyymmddhh  Special values: -999.x / -9.x / None → null          */
+  function parseCWA_MH(lines, type) {
+    // find column header line (starts with '#')
+    const headerLineIdx = lines.findIndex(l => l.trimStart().startsWith('#'));
+    if (headerLineIdx < 0) throw new Error('CWA MH 格式：找不到以 # 開頭的欄位標題列');
+
+    const headers = lines[headerLineIdx]
+      .replace(/^#\s*/, '')
+      .split(',')
+      .map(h => h.trim().toLowerCase());
+
+    // CWA code → our field name
+    const CWA_MAP = {
+      stno:  'stationId',
+      yyyymmddhh: 'obsTime',
+      ps01: 'pressure',        // 測站氣壓
+      ps02: 'seaPressure',     // 海平面氣壓
+      tx01: 'temperature',     // 氣溫
+      rh01: 'relativeHumidity',// 相對溼度
+      wd01: 'windSpeed',       // 平均風速
+      wd02: 'windDirection',   // 平均風向
+      wd04: 'maxWindSpeed',    // 最大平均風速
+      wd07: 'gustInfo',        // 最大瞬間風速
+      wd08: 'gustDirection',   // 最大瞬間風向
+      pp01: 'precipitation',   // 降水量 (= rain1hr)
+      pp02: 'rainHours',       // 降水時數
+      ss01: 'sunshineDuration',// 日照時數
+      gr01: 'radiation',       // 全天空日射量
+      td01: 'dewPoint',        // 露點溫度
+      vs01: 'visibility',      // 能見度
+      uv01: 'uvIndex',         // 紫外線指數
+    };
+
+    const col = name => headers.indexOf(name.toLowerCase());
+    const stnoIdx = col('stno');
+    const timeIdx = col('yyyymmddhh');
+    if (stnoIdx < 0) throw new Error('CWA MH 格式：找不到 stno（站碼）欄位');
+    if (timeIdx < 0) throw new Error('CWA MH 格式：找不到 yyyymmddhh（時間）欄位');
+
+    const parsed = [];
+    for (let i = headerLineIdx + 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line || line.startsWith('*') || line.startsWith('#')) continue;
+
+      const cells = line.split(',').map(c => c.trim());
+      if (cells.length < 2) continue;
+
+      const stno    = cells[stnoIdx];
+      const rawTime = cells[timeIdx];
+      if (!stno || !rawTime) continue;
+
+      // yyyymmddhh → ISO: 2026010101 → 2026-01-01T01:00:00
+      const y = rawTime.slice(0,4), mo = rawTime.slice(4,6),
+            d = rawTime.slice(6,8), h  = rawTime.slice(8,10);
+      const obsTime = `${y}-${mo}-${d}T${h}:00:00`;
+
+      // Map all columns
+      const rec = { stationId: stno, stationName: stno, obsTime, county: '', town: '' };
+      headers.forEach((h, idx) => {
+        const field = CWA_MAP[h];
+        if (field) rec[field] = toN(cells[idx]);
+      });
+
+      if (type === 'rainfall') {
+        // PP01（逐時降水量）→ rain1hr，用於累積雨量計算
+        parsed.push({
+          stationId:   rec.stationId,
+          stationName: rec.stationName,
+          obsTime:     rec.obsTime,
+          county:      rec.county,
+          town:        rec.town,
+          rain1hr:     rec.precipitation,   // PP01
+          rain10Min:   null,
+          rain3hr:     null,
+          rain6hr:     null,
+          rain12hr:    null,
+          rain24hr:    null,
+          rain48hr:    null,
+          rainMonth:   null,
+        });
+      } else {
+        parsed.push({
+          stationId:        rec.stationId,
+          stationName:      rec.stationName,
+          obsTime:          rec.obsTime,
+          county:           rec.county,
+          town:             rec.town,
+          temperature:      rec.temperature,
+          relativeHumidity: rec.relativeHumidity,
+          pressure:         rec.pressure,
+          windSpeed:        rec.windSpeed,
+          windDirection:    rec.windDirection,
+          gustInfo:         rec.gustInfo,
+          precipitation:    rec.precipitation,
+          sunshineDuration: rec.sunshineDuration,
+        });
+      }
+    }
+    if (!parsed.length) throw new Error('CWA MH 格式：標題行後無有效資料列');
+    return parsed;
+  }
+
+  /* ── Standard CSV parser (first row = headers) ── */
+  function parseStandardCSV(lines, type) {
+    if (lines.length < 2) throw new Error('CSV 至少需要標題列與一筆資料');
     const headers = splitCSVLine(lines[0]).map(h => h.trim());
 
-    // case-insensitive column finder with alias support
     const ALIASES = {
-      obstime:    ['obstime','datetime','time','obs_time','觀測時間','時間'],
-      stationid:  ['stationid','station_id','站號','stid'],
-      stationname:['stationname','station_name','站名','測站'],
-      county:     ['county','縣市','縣市名稱'],
-      town:       ['town','鄉鎮','鄉鎮市區'],
-      // rainfall
-      rain10min:  ['rain10min','10min','r10m','10分鐘雨量'],
-      rain1hr:    ['rain1hr','rain1h','1hr','1小時雨量','一小時雨量'],
-      rain3hr:    ['rain3hr','rain3h','3hr','3小時雨量'],
-      rain6hr:    ['rain6hr','rain6h','6hr','6小時雨量'],
-      rain12hr:   ['rain12hr','rain12h','12hr','12小時雨量'],
-      rain24hr:   ['rain24hr','rain24h','24hr','24小時雨量'],
-      rain48hr:   ['rain48hr','rain48h','48hr','48小時雨量'],
-      rainmonth:  ['rainmonth','rain_month','月累積','本月雨量'],
-      // weather
-      temperature:        ['temperature','temp','氣溫','temperature(°c)'],
-      relativehumidity:   ['relativehumidity','humidity','rh','相對濕度','濕度'],
-      pressure:           ['pressure','airpressure','氣壓'],
-      windspeed:          ['windspeed','wind_speed','風速'],
-      winddirection:      ['winddirection','wind_direction','風向'],
-      precipitation:      ['precipitation','precip','雨量','時雨量'],
+      obstime:         ['obstime','datetime','time','obs_time','觀測時間','時間'],
+      stationid:       ['stationid','station_id','站號','stid','stno'],
+      stationname:     ['stationname','station_name','站名','測站'],
+      county:          ['county','縣市','縣市名稱'],
+      town:            ['town','鄉鎮','鄉鎮市區'],
+      rain10min:       ['rain10min','10min','r10m','10分鐘雨量'],
+      rain1hr:         ['rain1hr','rain1h','1hr','1小時雨量','一小時雨量','pp01'],
+      rain3hr:         ['rain3hr','rain3h','3hr','3小時雨量'],
+      rain6hr:         ['rain6hr','rain6h','6hr','6小時雨量'],
+      rain12hr:        ['rain12hr','rain12h','12hr','12小時雨量'],
+      rain24hr:        ['rain24hr','rain24h','24hr','24小時雨量'],
+      rain48hr:        ['rain48hr','rain48h','48hr','48小時雨量'],
+      rainmonth:       ['rainmonth','rain_month','月累積','本月雨量'],
+      temperature:     ['temperature','temp','氣溫','tx01'],
+      relativehumidity:['relativehumidity','humidity','rh','相對濕度','濕度','rh01'],
+      pressure:        ['pressure','airpressure','氣壓','ps01'],
+      windspeed:       ['windspeed','wind_speed','風速','wd01'],
+      winddirection:   ['winddirection','wind_direction','風向','wd02'],
+      precipitation:   ['precipitation','precip','雨量','時雨量','pp01'],
     };
 
     function col(key) {
-      const aliases = ALIASES[key] || [key];
-      for (const alias of aliases) {
+      for (const alias of (ALIASES[key] || [key])) {
         const idx = headers.findIndex(h => h.toLowerCase().replace(/\s/g,'') === alias.toLowerCase().replace(/\s/g,''));
         if (idx >= 0) return idx;
       }
       return -1;
     }
 
-    const timeCol   = col('obstime');
-    const stIdCol   = col('stationid');
-    const nameCol   = col('stationname');
-    const countyCol = col('county');
-    const townCol   = col('town');
-
-    const missingCols = [];
-    if (timeCol   < 0) missingCols.push('ObsTime（時間欄）');
-    if (nameCol   < 0 && stIdCol < 0) missingCols.push('StationName 或 StationId');
-    if (missingCols.length) {
-      throw new Error(`找不到必要欄位：${missingCols.join('、')}。\n實際標題：${headers.join(', ')}`);
-    }
+    const timeCol = col('obstime'), stIdCol = col('stationid');
+    const nameCol = col('stationname'), countyCol = col('county'), townCol = col('town');
+    if (timeCol < 0) throw new Error(`找不到時間欄位。實際標題：${headers.slice(0,8).join(', ')}`);
 
     const parsed = [];
     for (let i = 1; i < lines.length; i++) {
       const cells = splitCSVLine(lines[i]);
       if (cells.length < 2) continue;
+      const rawTime = cells[timeCol]?.trim();
+      if (!rawTime) continue;
 
-      const obsTime = cells[timeCol]?.trim();
-      if (!obsTime) continue;
-
-      // normalise datetime (YYYY/MM/DD HH:MM → ISO)
-      const normTime = obsTime
+      const obsTime = rawTime
         .replace(/(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2})/, '$1-$2-$3T$4:$5:00')
         .replace(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/, '$1-$2-$3T$4:$5:00');
 
       const base = {
-        obsTime:     normTime,
+        obsTime,
         stationId:   cells[stIdCol]  ?.trim() || `ROW${i}`,
         stationName: cells[nameCol]  ?.trim() || '',
         county:      cells[countyCol]?.trim() || '',
@@ -180,23 +282,19 @@ const UploadUI = (() => {
 
       if (type === 'rainfall') {
         parsed.push({ ...base,
-          rain10Min: toN(cells[col('rain10min')]),
-          rain1hr:   toN(cells[col('rain1hr')]),
-          rain3hr:   toN(cells[col('rain3hr')]),
-          rain6hr:   toN(cells[col('rain6hr')]),
-          rain12hr:  toN(cells[col('rain12hr')]),
-          rain24hr:  toN(cells[col('rain24hr')]),
-          rain48hr:  toN(cells[col('rain48hr')]),
-          rainMonth: toN(cells[col('rainmonth')]),
+          rain10Min: toN(cells[col('rain10min')]), rain1hr:  toN(cells[col('rain1hr')]),
+          rain3hr:   toN(cells[col('rain3hr')]),   rain6hr:  toN(cells[col('rain6hr')]),
+          rain12hr:  toN(cells[col('rain12hr')]),  rain24hr: toN(cells[col('rain24hr')]),
+          rain48hr:  toN(cells[col('rain48hr')]),  rainMonth:toN(cells[col('rainmonth')]),
         });
       } else {
         parsed.push({ ...base,
-          temperature:       toN(cells[col('temperature')]),
-          relativeHumidity:  toN(cells[col('relativehumidity')]),
-          pressure:          toN(cells[col('pressure')]),
-          windSpeed:         toN(cells[col('windspeed')]),
-          windDirection:     toN(cells[col('winddirection')]),
-          precipitation:     toN(cells[col('precipitation')]),
+          temperature:      toN(cells[col('temperature')]),
+          relativeHumidity: toN(cells[col('relativehumidity')]),
+          pressure:         toN(cells[col('pressure')]),
+          windSpeed:        toN(cells[col('windspeed')]),
+          windDirection:    toN(cells[col('winddirection')]),
+          precipitation:    toN(cells[col('precipitation')]),
         });
       }
     }
@@ -231,9 +329,15 @@ const UploadUI = (() => {
   }
 
   function toN(v) {
-    if (v === undefined || v === null || v === '' || v === '-' || v === 'N/A') return null;
-    const n = parseFloat(v);
-    return isNaN(n) ? null : n;
+    if (v === undefined || v === null) return null;
+    const s = String(v).trim();
+    // CWA special values and common nulls
+    if (s === '' || s === '-' || s === 'N/A' || s === 'None' || s === 'X') return null;
+    const n = parseFloat(s);
+    if (isNaN(n)) return null;
+    // CWA error codes: negative values below -9
+    if (n <= -9 && (s.includes('-9') || s.includes('-999'))) return null;
+    return n;
   }
 
   /* ── Stats panel ── */
