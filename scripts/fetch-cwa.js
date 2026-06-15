@@ -4,6 +4,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 
 const CWA_KEY     = process.env.CWA_API_KEY        || 'CWA-4024AEE6-8945-4BAE-9AE2-3A5D649911CC';
 const SB_URL      = process.env.SUPABASE_URL        || '';
@@ -16,7 +17,7 @@ const RAINFALL_EP = `${CWA_BASE}/O-A0002-001`;
 
 const BATCH_SIZE  = 500;   // Supabase upsert batch size
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────
 
 function toN(v) {
   if (v === null || v === undefined || v === '' || v === '-' || v === 'None') return null;
@@ -35,7 +36,7 @@ async function fetchJSON(url) {
   return resp.json();
 }
 
-// ── CWA Parsers ─────────────────────────────────────────────────────────────
+// ── CWA Parsers ──────────────────────────────────────────────────────────
 
 function parseWeatherStation(s) {
   const ow = s.WeatherElement || {};
@@ -75,7 +76,7 @@ function parseRainfallStation(s) {
   };
 }
 
-// ── Supabase Upsert ─────────────────────────────────────────────────────────
+// ── Supabase Upsert ────────────────────────────────────────────────────────
 
 async function upsertBatched(sb, table, rows, conflict) {
   let total = 0;
@@ -89,7 +90,7 @@ async function upsertBatched(sb, table, rows, conflict) {
   return total;
 }
 
-// ── Main ────────────────────────────────────────────────────────────────────
+// ── Main ────────────────────────────────────────────────────────────
 
 async function main() {
   log('═══ CWA 逐時氣象資料擷取開始 ═══');
@@ -133,7 +134,22 @@ async function main() {
     process.exit(0);
   }
 
-  const sb = createClient(SB_URL, SB_KEY);
+  const sb = createClient(SB_URL, SB_KEY, {
+    realtime: {
+      headers: {
+        'X-Client-Info': 'supabase-js/2.x',
+      },
+    },
+    global: {
+      fetch: (url, options = {}) =>
+        fetch(url, { ...options }),
+    },
+  });
+
+  // 為 Supabase 客戶端配置 WebSocket（Node.js 20 相容性）
+  if (typeof globalThis.WebSocket === 'undefined') {
+    globalThis.WebSocket = WebSocket;
+  }
 
   let wOk = 0, rOk = 0;
   if (weatherRows.length) {
