@@ -1,0 +1,50 @@
+name: 逐時氣象資料自動下載
+
+on:
+  schedule:
+    # 每小時第 5 分鐘執行（UTC，台灣時間 +8 小時）
+    - cron: '5 * * * *'
+  workflow_dispatch:
+    # 允許手動觸發
+    inputs:
+      debug:
+        description: '啟用除錯輸出'
+        required: false
+        default: 'false'
+
+jobs:
+  fetch-weather:
+    name: 取得 CWA 逐時氣象資料
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: scripts/package.json
+
+      - name: Install dependencies
+        run: |
+          cd scripts
+          npm ci
+
+      - name: 取得氣象資料並寫入 Supabase
+        env:
+          CWA_API_KEY:        ${{ secrets.CWA_API_KEY }}
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DEBUG:              ${{ github.event.inputs.debug }}
+        run: |
+          cd scripts
+          node fetch-cwa.js
+
+      - name: 記錄執行結果
+        if: always()
+        run: |
+          echo "完成時間：$(TZ='Asia/Taipei' date '+%Y-%m-%d %H:%M:%S') (台灣時間)"

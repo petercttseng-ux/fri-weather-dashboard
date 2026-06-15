@@ -1,0 +1,16 @@
+{
+  "name": "fri-weather-fetch",
+  "version": "1.0.0",
+  "description": "CWA 逐時氣象資料自動擷取腳本",
+  "type": "module",
+  "main": "fetch-cwa.js",
+  "scripts": {
+    "fetch": "node fetch-cwa.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
